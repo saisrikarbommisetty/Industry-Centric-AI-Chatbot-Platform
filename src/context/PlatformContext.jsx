@@ -16,10 +16,14 @@ export const PlatformProvider = ({ children }) => {
     return localStorage.getItem('nexus_theme') || 'dark';
   });
 
-  // User State
+  // Auth State
+  const [isAuthenticated, setIsAuthenticated] = useState(() => {
+    return localStorage.getItem('nexus_auth') === 'true';
+  });
+
   const [currentUser, setCurrentUser] = useState(() => {
     const saved = localStorage.getItem('nexus_user');
-    return saved ? JSON.parse(saved) : DEMO_USERS[0];
+    return saved ? JSON.parse(saved) : (localStorage.getItem('nexus_auth') === 'true' ? DEMO_USERS[0] : null);
   });
 
   // Bots State
@@ -51,7 +55,13 @@ export const PlatformProvider = ({ children }) => {
 
   // Persist State to LocalStorage
   useEffect(() => {
-    localStorage.setItem('nexus_user', JSON.stringify(currentUser));
+    if (currentUser) {
+      localStorage.setItem('nexus_user', JSON.stringify(currentUser));
+      localStorage.setItem('nexus_auth', 'true');
+    } else {
+      localStorage.removeItem('nexus_user');
+      localStorage.removeItem('nexus_auth');
+    }
   }, [currentUser]);
 
   useEffect(() => {
@@ -113,6 +123,7 @@ export const PlatformProvider = ({ children }) => {
 
     setUsers((prev) => [newUser, ...prev.filter((u) => u.email !== userData.email)]);
     setCurrentUser(newUser);
+    setIsAuthenticated(true);
     addToast(`Account created for ${newUser.name}! Welcome to ${newUser.organization}.`, 'success');
     return newUser;
   };
@@ -121,6 +132,7 @@ export const PlatformProvider = ({ children }) => {
     const found = users.find((u) => u.email.toLowerCase() === email.toLowerCase());
     if (found) {
       setCurrentUser(found);
+      setIsAuthenticated(true);
       addToast(`Welcome back, ${found.name}! Signed in to ${found.organization}.`, 'success');
       return { success: true, user: found };
     }
@@ -142,11 +154,16 @@ export const PlatformProvider = ({ children }) => {
 
     setUsers((prev) => [newUser, ...prev]);
     setCurrentUser(newUser);
+    setIsAuthenticated(true);
     addToast(`Signed in as ${newUser.name} (${newUser.organization})`, 'success');
     return { success: true, user: newUser };
   };
 
   const logoutUser = () => {
+    setCurrentUser(null);
+    setIsAuthenticated(false);
+    localStorage.removeItem('nexus_user');
+    localStorage.removeItem('nexus_auth');
     addToast('Signed out of workspace', 'info');
   };
 
@@ -157,6 +174,7 @@ export const PlatformProvider = ({ children }) => {
   const switchUser = (userId) => {
     const found = users.find((u) => u.id === userId) || DEMO_USERS.find((u) => u.id === userId) || users[0];
     setCurrentUser(found);
+    setIsAuthenticated(true);
     addToast(`Switched account to ${found.name} (${found.organization})`, 'info');
   };
 
@@ -447,6 +465,7 @@ export const PlatformProvider = ({ children }) => {
       value={{
         theme,
         toggleTheme,
+        isAuthenticated,
         currentUser,
         users,
         registerUser,

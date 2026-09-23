@@ -29,21 +29,29 @@ import { PricingPage } from './pages/global/PricingPage';
 import { AccountPage } from './pages/global/AccountPage';
 import { HelpDocsPage } from './pages/global/HelpDocsPage';
 
-// Standalone Public Chat Preview
 import { PublicChatPreview } from './pages/chat/PublicChatPreview';
+import { usePlatform } from './context/PlatformContext';
 
 export const App = () => {
+  const { isAuthenticated } = usePlatform();
+
   return (
     <Routes>
       {/* Auth Routes */}
-      <Route path="/login" element={<Login />} />
-      <Route path="/signup" element={<Signup />} />
+      <Route 
+        path="/login" 
+        element={isAuthenticated ? <Navigate to="/" replace /> : <Login />} 
+      />
+      <Route 
+        path="/signup" 
+        element={isAuthenticated ? <Navigate to="/" replace /> : <Signup />} 
+      />
 
-      {/* Standalone Customer Chat Preview */}
+      {/* Standalone Customer Chat Preview (Public) */}
       <Route path="/chat/:botId" element={<PublicChatPreview />} />
 
-      {/* Authenticated Workspace Shell */}
-      <Route element={<Layout />}>
+      {/* Workspace Shell (Requires Authentication) */}
+      <Route element={isAuthenticated ? <Layout /> : <Navigate to="/login" replace />}>
         <Route path="/" element={<Dashboard />} />
         
         {/* Bots Hub & Wizard */}
@@ -70,7 +78,7 @@ export const App = () => {
       </Route>
 
       {/* Fallback */}
-      <Route path="*" element={<Navigate to="/" replace />} />
+      <Route path="*" element={<Navigate to={isAuthenticated ? "/" : "/login"} replace />} />
     </Routes>
   );
 };
