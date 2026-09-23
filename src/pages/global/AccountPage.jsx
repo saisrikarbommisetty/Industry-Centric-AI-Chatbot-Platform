@@ -10,16 +10,17 @@ import {
   Check, 
   Trash2, 
   Shield, 
-  Sparkles,
-  RefreshCw,
-  Mail
+  Sparkles, 
+  RefreshCw, 
+  Mail,
+  LogOut
 } from 'lucide-react';
 import { usePlatform } from '../../context/PlatformContext';
 import { DEMO_USERS } from '../../data/mockData';
 
 export const AccountPage = () => {
   const navigate = useNavigate();
-  const { currentUser, switchUser, addToast } = usePlatform();
+  const { currentUser, switchUser, logoutUser, addToast } = usePlatform();
 
   const [apiKeys, setApiKeys] = useState([
     { id: 'key-1', name: 'Production Webhook Key', key: 'nx_live_98a7b6c5d4e3f21049283746', created: '12 Aug 2026', status: 'active' },
@@ -72,12 +73,14 @@ export const AccountPage = () => {
         </div>
 
         <button 
-          className="btn btn-outline btn-sm"
+          className="btn btn-outline btn-sm text-danger"
           onClick={() => {
+            logoutUser();
             navigate('/login');
           }}
         >
-          <span>Sign Out / Switch Account</span>
+          <LogOut size={14} />
+          <span>Sign Out</span>
         </button>
       </div>
 

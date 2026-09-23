@@ -161,7 +161,7 @@ export const Topbar = ({ onToggleMobile }) => {
           onClick={() => navigate('/pricing')}
           title="Click to view plan details"
         >
-          {currentUser.plan}
+          {currentUser?.plan || 'Growth Pro'}
         </div>
       </div>
     </header>

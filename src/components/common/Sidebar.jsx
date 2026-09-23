@@ -14,12 +14,13 @@ import {
   Moon, 
   Sun,
   X,
-  ExternalLink
+  ExternalLink,
+  LogOut
 } from 'lucide-react';
 import { usePlatform } from '../../context/PlatformContext';
 
 export const Sidebar = ({ mobileOpen, setMobileOpen }) => {
-  const { theme, toggleTheme, currentUser, bots, switchUser } = usePlatform();
+  const { theme, toggleTheme, currentUser, bots, switchUser, logoutUser } = usePlatform();
   const navigate = useNavigate();
 
   const handleNavClick = () => {
@@ -137,21 +138,22 @@ export const Sidebar = ({ mobileOpen, setMobileOpen }) => {
 
         <div className="flex items-center justify-between gap-1">
           <div className="user-card" style={{ flex: 1, minWidth: 0 }} onClick={() => navigate('/account')}>
-            <div className="user-avatar">{currentUser.avatar}</div>
+            <div className="user-avatar">{currentUser?.avatar || 'U'}</div>
             <div className="user-details">
-              <div className="user-name">{currentUser.name}</div>
-              <div className="user-role">{currentUser.role}</div>
+              <div className="user-name">{currentUser?.name || 'User'}</div>
+              <div className="user-role">{currentUser?.role || 'Workspace Member'}</div>
             </div>
           </div>
 
           <button
             className="btn btn-ghost btn-sm btn-icon text-muted"
-            title="Sign Out / Switch Account"
+            title="Sign Out"
             onClick={() => {
+              logoutUser();
               navigate('/login');
             }}
           >
-            <ExternalLink size={15} />
+            <LogOut size={16} />
           </button>
         </div>
       </div>
