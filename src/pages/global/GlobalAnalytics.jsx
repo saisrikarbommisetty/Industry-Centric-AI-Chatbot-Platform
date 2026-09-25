@@ -1,23 +1,25 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { 
   BarChart3, 
   TrendingUp, 
-  Users, 
   MessageSquare, 
-  Sparkles, 
-  Layers, 
-  Download,
-  Building2,
-  GraduationCap,
-  HeartPulse,
-  Hotel
+  Users, 
+  Activity,
+  Download
 } from 'lucide-react';
 import { usePlatform } from '../../context/PlatformContext';
-import { VolumeAreaChart, BhkBarChart, SentimentDonutChart, HourlyHeatmap } from '../../components/common/Charts';
+import { 
+  VolumeAreaChart, 
+  BhkBarChart, 
+  SentimentDonutChart 
+} from '../../components/common/Charts';
 
 export const GlobalAnalytics = () => {
-  const { analytics, bots, addToast } = usePlatform();
-  const [timeframe, setTimeframe] = useState('30d');
+  const { analytics, addToast } = usePlatform();
+
+  const handleExport = () => {
+    addToast('Workspace analytics report downloaded as CSV', 'success');
+  };
 
   return (
     <div className="page-container">
@@ -25,82 +27,75 @@ export const GlobalAnalytics = () => {
       <div className="page-header">
         <div>
           <h1 className="page-title">
-            <BarChart3 size={24} style={{ color: 'var(--primary)' }} />
-            Platform-Wide Intelligence & Growth Analytics
+            Analytics
           </h1>
           <p className="page-description">
-            Aggregated metrics spanning all deployed industry chatbots, lead ingestion pipelines, and multi-tenant conversion rates.
+            High-level performance overview across all customer assistant interactions.
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
-          <div className="tab-pill-list">
-            {['7d', '30d', '90d', 'all'].map((t) => (
-              <button
-                key={t}
-                className={`tab-pill ${timeframe === t ? 'active' : ''}`}
-                onClick={() => setTimeframe(t)}
-              >
-                {t.toUpperCase()}
-              </button>
-            ))}
-          </div>
-
-          <button className="btn btn-secondary btn-sm" onClick={() => addToast('Global intelligence report exported', 'success')}>
-            <Download size={14} />
-            <span>Export Analytics</span>
-          </button>
-        </div>
+        <button className="btn btn-secondary btn-sm" onClick={handleExport}>
+          <Download size={14} />
+          <span>Export CSV</span>
+        </button>
       </div>
 
-      {/* KPI Stats */}
+      {/* 4 Basic KPI Cards */}
       <div className="grid-4" style={{ marginBottom: '1.75rem' }}>
         <div className="stat-card">
           <div className="flex items-center justify-between">
-            <span className="text-muted" style={{ fontSize: '0.8rem' }}>Organization Inquiries</span>
-            <MessageSquare size={16} className="text-primary" />
+            <span className="text-muted" style={{ fontSize: '0.8rem', fontWeight: 600 }}>Total Conversations</span>
+            <MessageSquare size={16} style={{ color: 'var(--primary)' }} />
           </div>
-          <div className="stat-value">{analytics.overview.totalConversations.toLocaleString()}</div>
-          <span className="stat-trend up"><TrendingUp size={12} /> {analytics.overview.conversationsChange}</span>
+          <div className="stat-value">{analytics.overview.totalConversations}</div>
+          <span className="stat-trend up">
+            <TrendingUp size={12} />
+            {analytics.overview.conversationsChange} this month
+          </span>
         </div>
 
         <div className="stat-card">
           <div className="flex items-center justify-between">
-            <span className="text-muted" style={{ fontSize: '0.8rem' }}>Total Qualified Leads</span>
-            <Users size={16} style={{ color: 'var(--accent-emerald)' }} />
+            <span className="text-muted" style={{ fontSize: '0.8rem', fontWeight: 600 }}>Unique Visitors</span>
+            <Users size={16} style={{ color: 'var(--accent-gold)' }} />
           </div>
-          <div className="stat-value">{analytics.overview.totalLeadsCaptured.toLocaleString()}</div>
-          <span className="stat-trend up"><TrendingUp size={12} /> {analytics.overview.leadsChange}</span>
+          <div className="stat-value">{analytics.overview.totalVisitors || 218}</div>
+          <span className="stat-trend up">
+            <TrendingUp size={12} />
+            {analytics.overview.visitorsChange || '+14.2%'} growth
+          </span>
         </div>
 
         <div className="stat-card">
           <div className="flex items-center justify-between">
-            <span className="text-muted" style={{ fontSize: '0.8rem' }}>Knowledge Base Vectors</span>
-            <Layers size={16} style={{ color: 'var(--accent-purple)' }} />
+            <span className="text-muted" style={{ fontSize: '0.8rem', fontWeight: 600 }}>Qualified Leads</span>
+            <Activity size={16} style={{ color: 'var(--accent-emerald)' }} />
           </div>
-          <div className="stat-value">1,480</div>
-          <span className="badge badge-purple" style={{ fontSize: '0.68rem' }}>Across {bots.length} Active Bots</span>
+          <div className="stat-value">{analytics.overview.totalLeadsCaptured}</div>
+          <span className="stat-trend up">
+            <TrendingUp size={12} />
+            {analytics.overview.leadsChange} conversion
+          </span>
         </div>
 
         <div className="stat-card">
           <div className="flex items-center justify-between">
-            <span className="text-muted" style={{ fontSize: '0.8rem' }}>Avg Customer CSAT</span>
-            <Sparkles size={16} style={{ color: 'var(--accent-amber)' }} />
+            <span className="text-muted" style={{ fontSize: '0.8rem', fontWeight: 600 }}>Average CSAT</span>
+            <span style={{ color: 'var(--accent-gold)', fontSize: '0.9rem' }}>★</span>
           </div>
           <div className="stat-value">{analytics.overview.avgCsatScore}</div>
-          <span className="text-success" style={{ fontSize: '0.72rem', fontWeight: 600 }}>97% Positive Feedback</span>
+          <span className="badge badge-success" style={{ fontSize: '0.65rem' }}>96% positive</span>
         </div>
       </div>
 
-      {/* Main Charts */}
-      <div className="grid-12" style={{ marginBottom: '1.75rem' }}>
+      {/* 2 Clean Charts */}
+      <div className="grid-12" style={{ gap: '1.25rem', marginBottom: '1.5rem' }}>
         <div className="card" style={{ gridColumn: 'span 8' }}>
           <div className="card-header">
             <div>
-              <h3 className="card-title">Aggregated Customer Sessions & Lead Capture Velocity</h3>
-              <p className="card-subtitle">Daily interaction trends across all industry verticals</p>
+              <h3 className="card-title">Inquiry Activity</h3>
+              <p className="card-subtitle">Daily sessions vs high-intent inquiries</p>
             </div>
-            <span className="badge badge-primary">Trend: Upward</span>
           </div>
           <VolumeAreaChart data={analytics.dailyVolume} />
         </div>
@@ -108,53 +103,11 @@ export const GlobalAnalytics = () => {
         <div className="card" style={{ gridColumn: 'span 4' }}>
           <div className="card-header">
             <div>
-              <h3 className="card-title">Sentiment & CSAT Index</h3>
-              <p className="card-subtitle">Visitor satisfaction distribution</p>
+              <h3 className="card-title">Visitor Feedback</h3>
+              <p className="card-subtitle">Sentiment breakdown</p>
             </div>
           </div>
           <SentimentDonutChart items={analytics.sentimentBreakdown} />
-        </div>
-      </div>
-
-      {/* Multi-Industry Breakdown Cards */}
-      <div className="grid-3" style={{ marginBottom: '1.75rem' }}>
-        <div className="card">
-          <div className="flex items-center gap-3" style={{ marginBottom: '0.85rem' }}>
-            <span style={{ fontSize: '1.5rem' }}>🏢</span>
-            <div>
-              <h4 style={{ fontWeight: 700 }}>Real Estate Vertical (Prycoons)</h4>
-              <span className="badge badge-primary">1,842 Sessions • 528 Leads</span>
-            </div>
-          </div>
-          <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
-            High-intent property discovery for 3BHK, Sky Villas, GIFT City investments, and weekend site visits.
-          </p>
-        </div>
-
-        <div className="card">
-          <div className="flex items-center gap-3" style={{ marginBottom: '0.85rem' }}>
-            <span style={{ fontSize: '1.5rem' }}>🎓</span>
-            <div>
-              <h4 style={{ fontWeight: 700 }}>Education & EdTech (EduNova)</h4>
-              <span className="badge badge-purple">924 Sessions • 310 Leads</span>
-            </div>
-          </div>
-          <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
-            Admissions counselor queries, curriculum requirements, merit scholarships, and campus visit bookings.
-          </p>
-        </div>
-
-        <div className="card">
-          <div className="flex items-center gap-3" style={{ marginBottom: '0.85rem' }}>
-            <span style={{ fontSize: '1.5rem' }}>🩺</span>
-            <div>
-              <h4 style={{ fontWeight: 700 }}>Healthcare & Clinics (CarePoint)</h4>
-              <span className="badge badge-danger">640 Sessions • 198 Leads</span>
-            </div>
-          </div>
-          <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
-            Patient department routing, specialist doctor timings, and outpatient appointment bookings.
-          </p>
         </div>
       </div>
     </div>

@@ -6,12 +6,10 @@ import {
   Save, 
   Trash2, 
   AlertTriangle, 
-  Sliders, 
-  Cpu, 
   Mail, 
-  Webhook, 
-  ShieldAlert,
-  CheckCircle2
+  CheckCircle2,
+  Sliders,
+  Palette
 } from 'lucide-react';
 import { usePlatform } from '../../context/PlatformContext';
 
@@ -25,14 +23,11 @@ export const BotSettings = () => {
   const [formData, setFormData] = useState({
     name: currentBot?.name || '',
     avatar: currentBot?.avatar || '🏢',
-    tone: currentBot?.tone || 'Consultative, Professional & Prestigious',
-    model: currentBot?.model || 'Gemini 1.5 Pro (Domain-Tuned)',
-    temperature: 0.2,
+    description: currentBot?.description || '',
     welcomeMessage: currentBot?.welcomeMessage || '',
     promptGuidelines: currentBot?.promptGuidelines || '',
-    webhookUrl: 'https://api.prycoons.com/webhooks/ai-leads',
-    notificationEmail: 'sales-leads@prycoons.com',
-    leadCaptureEnabled: currentBot?.leadCaptureEnabled !== undefined ? currentBot?.leadCaptureEnabled : true
+    primaryColor: currentBot?.primaryColor || '#C85C4A',
+    notificationEmail: 'sales-leads@prycoons.com'
   });
 
   const [showDeleteModal, setShowDeleteModal] = useState(false);
@@ -42,11 +37,10 @@ export const BotSettings = () => {
     updateBot(currentBot.id, {
       name: formData.name,
       avatar: formData.avatar,
-      tone: formData.tone,
-      model: formData.model,
+      description: formData.description,
       welcomeMessage: formData.welcomeMessage,
       promptGuidelines: formData.promptGuidelines,
-      leadCaptureEnabled: formData.leadCaptureEnabled
+      primaryColor: formData.primaryColor
     });
   };
 
@@ -59,25 +53,27 @@ export const BotSettings = () => {
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
       <BotNav />
 
-      <div className="page-container" style={{ paddingTop: 0, maxWidth: '900px' }}>
-        <div style={{ marginBottom: '1.5rem' }}>
-          <h2 style={{ fontSize: '1.35rem', fontWeight: 700 }}>Assistant Settings & Governance</h2>
-          <p style={{ fontSize: '0.825rem', color: 'var(--text-muted)' }}>
-            Configure model intelligence parameters, behavioral guardrails, lead webhook integration, and lifecycle controls.
+      <div className="page-container" style={{ paddingTop: 0, maxWidth: '840px' }}>
+        <div style={{ marginBottom: '1.75rem' }}>
+          <h2 style={{ fontSize: '1.35rem', fontWeight: 800, color: 'var(--text-primary)' }}>
+            Assistant Settings
+          </h2>
+          <p style={{ fontSize: '0.825rem', color: 'var(--text-secondary)' }}>
+            Configure assistant details, welcome message, behavioral instructions, and notifications.
           </p>
         </div>
 
         <form onSubmit={handleSubmit}>
-          {/* General Configuration Card */}
-          <div className="card" style={{ marginBottom: '1.5rem' }}>
+          {/* General Section */}
+          <div className="card" style={{ marginBottom: '1.5rem', padding: '1.75rem' }}>
             <div className="card-header">
               <div>
-                <h3 className="card-title">General Identity</h3>
-                <p className="card-subtitle">Assistant name, avatar, and branding</p>
+                <h3 className="card-title">General Details</h3>
+                <p className="card-subtitle">Assistant name and description</p>
               </div>
             </div>
 
-            <div className="grid-2" style={{ gap: '1rem' }}>
+            <div className="grid-2" style={{ gap: '1rem', marginBottom: '1rem' }}>
               <div className="form-group">
                 <label className="form-label">Assistant Name</label>
                 <input
@@ -94,134 +90,101 @@ export const BotSettings = () => {
                 <div className="flex items-center gap-2">
                   <div 
                     style={{
-                      width: '40px',
-                      height: '40px',
+                      width: '38px',
+                      height: '38px',
                       borderRadius: 'var(--radius-md)',
-                      background: 'var(--primary-subtle)',
+                      backgroundColor: 'var(--accent-soft-surface)',
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
-                      fontSize: '1.4rem'
+                      fontSize: '1.35rem',
+                      border: '1px solid var(--border-default)',
+                      flexShrink: 0
                     }}
                   >
                     {formData.avatar}
                   </div>
                   <input
                     type="text"
+                    maxLength={3}
                     className="form-input"
                     value={formData.avatar}
                     onChange={(e) => setFormData({ ...formData, avatar: e.target.value })}
-                    style={{ width: '80px', textAlign: 'center' }}
                   />
                 </div>
+              </div>
+            </div>
+
+            <div className="form-group" style={{ marginBottom: 0 }}>
+              <label className="form-label">Description</label>
+              <textarea
+                rows={2}
+                className="form-textarea"
+                value={formData.description}
+                onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+              />
+            </div>
+          </div>
+
+          {/* Appearance & Greeting */}
+          <div className="card" style={{ marginBottom: '1.5rem', padding: '1.75rem' }}>
+            <div className="card-header">
+              <div>
+                <h3 className="card-title">Appearance & Greeting</h3>
+                <p className="card-subtitle">First message shown to customers</p>
               </div>
             </div>
 
             <div className="form-group">
               <label className="form-label">Welcome Message</label>
               <textarea
+                rows={3}
+                required
                 className="form-textarea"
-                rows="2"
                 value={formData.welcomeMessage}
                 onChange={(e) => setFormData({ ...formData, welcomeMessage: e.target.value })}
               />
             </div>
+
+            <div className="form-group" style={{ marginBottom: 0 }}>
+              <label className="form-label">Brand Accent Color</label>
+              <div className="flex items-center gap-3">
+                <input
+                  type="color"
+                  value={formData.primaryColor}
+                  onChange={(e) => setFormData({ ...formData, primaryColor: e.target.value })}
+                  style={{ width: '42px', height: '36px', padding: 0, border: 'none', borderRadius: 'var(--radius-sm)', cursor: 'pointer' }}
+                />
+                <span className="font-mono text-secondary" style={{ fontSize: '0.85rem' }}>{formData.primaryColor}</span>
+              </div>
+            </div>
           </div>
 
-          {/* Model & Persona Tuning */}
-          <div className="card" style={{ marginBottom: '1.5rem' }}>
+          {/* Behaviour & Instructions */}
+          <div className="card" style={{ marginBottom: '1.5rem', padding: '1.75rem' }}>
             <div className="card-header">
               <div>
-                <h3 className="card-title">
-                  <Cpu size={18} style={{ color: 'var(--accent-purple)' }} />
-                  LLM Model & Persona Tuning
-                </h3>
-                <p className="card-subtitle">Control response creativity and precision</p>
+                <h3 className="card-title">Behaviour & Instructions</h3>
+                <p className="card-subtitle">Guidelines the assistant follows when answering questions</p>
               </div>
             </div>
 
-            <div className="grid-2" style={{ gap: '1rem', marginBottom: '1rem' }}>
-              <div className="form-group">
-                <label className="form-label">Underlying Foundation Model</label>
-                <select
-                  className="form-select"
-                  value={formData.model}
-                  onChange={(e) => setFormData({ ...formData, model: e.target.value })}
-                >
-                  <option value="Gemini 1.5 Pro (Domain-Tuned)">Gemini 1.5 Pro (High Reasoning & Knowledge Grounding)</option>
-                  <option value="Gemini 1.5 Flash (Fast)">Gemini 1.5 Flash (Ultra-Low Latency 0.4s)</option>
-                  <option value="Claude 3.5 Sonnet">Claude 3.5 Sonnet (Nuanced Dialogue)</option>
-                </select>
-              </div>
-
-              <div className="form-group">
-                <label className="form-label">
-                  <span>Temperature (Hallucination Control): {formData.temperature}</span>
-                  <span className="label-hint">Lower is more factual</span>
-                </label>
-                <input
-                  type="range"
-                  min="0.0"
-                  max="1.0"
-                  step="0.05"
-                  value={formData.temperature}
-                  onChange={(e) => setFormData({ ...formData, temperature: parseFloat(e.target.value) })}
-                  style={{ width: '100%', accentColor: 'var(--primary)', marginTop: '0.5rem' }}
-                />
-              </div>
-            </div>
-
-            <div className="form-group">
-              <label className="form-label">System Behavioral Prompt Guidelines</label>
+            <div className="form-group" style={{ marginBottom: 0 }}>
+              <label className="form-label">Assistant Instructions</label>
               <textarea
+                rows={4}
                 className="form-textarea"
-                rows="3"
                 value={formData.promptGuidelines}
                 onChange={(e) => setFormData({ ...formData, promptGuidelines: e.target.value })}
               />
             </div>
           </div>
 
-          {/* Lead Capture Webhooks & Notification Card */}
-          <div className="card" style={{ marginBottom: '1.5rem' }}>
-            <div className="card-header">
-              <div>
-                <h3 className="card-title">
-                  <Webhook size={18} style={{ color: 'var(--accent-emerald)' }} />
-                  CRM Webhooks & Lead Routing
-                </h3>
-                <p className="card-subtitle">Dispatch visitor leads directly to your sales pipeline</p>
-              </div>
-            </div>
-
-            <div className="grid-2" style={{ gap: '1rem' }}>
-              <div className="form-group">
-                <label className="form-label">Webhook Endpoint (POST JSON)</label>
-                <input
-                  type="url"
-                  className="form-input font-mono"
-                  value={formData.webhookUrl}
-                  onChange={(e) => setFormData({ ...formData, webhookUrl: e.target.value })}
-                />
-              </div>
-
-              <div className="form-group">
-                <label className="form-label">Lead Notification Email</label>
-                <input
-                  type="email"
-                  className="form-input"
-                  value={formData.notificationEmail}
-                  onChange={(e) => setFormData({ ...formData, notificationEmail: e.target.value })}
-                />
-              </div>
-            </div>
-          </div>
-
-          {/* Save Button Bar */}
-          <div className="flex items-center justify-end" style={{ marginBottom: '2.5rem' }}>
+          {/* Save Button */}
+          <div className="flex justify-end" style={{ marginBottom: '2rem' }}>
             <button type="submit" className="btn btn-primary btn-lg">
               <Save size={16} />
-              <span>Save Assistant Settings</span>
+              <span>Save Changes</span>
             </button>
           </div>
         </form>
@@ -230,24 +193,20 @@ export const BotSettings = () => {
         <div 
           className="card"
           style={{
-            border: '1px solid rgba(244, 63, 94, 0.3)',
-            background: 'rgba(244, 63, 94, 0.04)',
-            padding: '1.5rem'
+            borderColor: 'rgba(220, 38, 38, 0.25)',
+            background: 'var(--bg-surface)',
+            padding: '1.5rem 1.75rem',
+            borderRadius: 'var(--radius-lg)'
           }}
         >
-          <div className="flex items-center gap-2 text-danger" style={{ marginBottom: '0.5rem', fontWeight: 700 }}>
-            <ShieldAlert size={18} />
-            <span>Danger Zone</span>
-          </div>
-
-          <div className="flex items-center justify-between flex-wrap gap-4">
+          <div className="flex items-center justify-between flex-wrap gap-3">
             <div>
-              <div style={{ fontWeight: 600, fontSize: '0.9rem', color: 'var(--text-primary)' }}>
-                Delete this AI Assistant
-              </div>
-              <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-                Permanently destroy all {currentBot.sourcesCount || 0} vectorized knowledge sources and conversation archives.
-              </div>
+              <h3 style={{ fontSize: '1rem', fontWeight: 700, color: '#DC2626' }}>
+                Delete Assistant
+              </h3>
+              <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '0.2rem' }}>
+                Permanently removes this assistant and its conversation records.
+              </p>
             </div>
 
             <button 
@@ -264,28 +223,35 @@ export const BotSettings = () => {
 
       {/* Delete Confirmation Modal */}
       {showDeleteModal && (
-        <div className="modal-overlay" onClick={() => setShowDeleteModal(false)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-backdrop">
+          <div className="modal-card">
             <div className="modal-header">
-              <h3 className="card-title text-danger" style={{ fontSize: '1.1rem' }}>
-                <AlertTriangle size={18} />
-                Confirm Assistant Deletion
-              </h3>
+              <div className="flex items-center gap-2">
+                <AlertTriangle size={18} className="text-danger" />
+                <h3 className="card-title">Confirm Deletion</h3>
+              </div>
             </div>
+
             <div className="modal-body">
-              <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', lineHeight: 1.6 }}>
-                Are you sure you want to delete <strong>{currentBot.name}</strong>?
-              </p>
-              <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', marginTop: '0.5rem' }}>
-                This action cannot be undone. All active embed widgets on your website will immediately cease functioning.
+              <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
+                Are you sure you want to delete <strong>{currentBot.name}</strong>? This action cannot be undone.
               </p>
             </div>
+
             <div className="modal-footer">
-              <button className="btn btn-secondary btn-sm" onClick={() => setShowDeleteModal(false)}>
+              <button 
+                type="button" 
+                className="btn btn-secondary btn-sm"
+                onClick={() => setShowDeleteModal(false)}
+              >
                 Cancel
               </button>
-              <button className="btn btn-danger btn-sm" onClick={handleDelete}>
-                Yes, Delete Permanently
+              <button 
+                type="button" 
+                className="btn btn-danger btn-sm"
+                onClick={handleDelete}
+              >
+                Delete Permanently
               </button>
             </div>
           </div>

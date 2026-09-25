@@ -1,16 +1,13 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
-  MessageSquareText, 
+  MessageSquare, 
   Search, 
-  Filter, 
   Download, 
   ExternalLink, 
-  Clock, 
-  CheckCircle2, 
   User, 
-  Calendar,
-  Sparkles
+  Phone,
+  Clock
 } from 'lucide-react';
 import { usePlatform } from '../../context/PlatformContext';
 
@@ -29,7 +26,7 @@ export const GlobalHistory = () => {
   });
 
   const handleExportAll = () => {
-    addToast('Audit log of all conversations exported as CSV', 'success');
+    addToast('Conversation log exported as CSV', 'success');
   };
 
   return (
@@ -38,29 +35,28 @@ export const GlobalHistory = () => {
       <div className="page-header">
         <div>
           <h1 className="page-title">
-            <MessageSquareText size={24} style={{ color: 'var(--primary)' }} />
-            Unified Conversation Audit Log
+            Conversations
           </h1>
           <p className="page-description">
-            Audit customer transcripts, high-intent lead captures, and satisfaction metrics across all active industry AI assistants.
+            Review customer inquiries, requested site visits, and consultation transcripts.
           </p>
         </div>
 
         <button className="btn btn-secondary btn-sm" onClick={handleExportAll}>
           <Download size={14} />
-          <span>Export All CSV</span>
+          <span>Export CSV</span>
         </button>
       </div>
 
       {/* Filter Bar */}
       <div className="card" style={{ padding: '0.85rem 1.25rem', marginBottom: '1.5rem' }}>
         <div className="flex items-center justify-between flex-wrap gap-3">
-          <div className="input-wrapper" style={{ maxWidth: '320px' }}>
+          <div className="input-wrapper" style={{ maxWidth: '300px', width: '100%' }}>
             <Search size={16} className="input-icon-left" />
             <input
               type="text"
               className="form-input has-left-icon"
-              placeholder="Search by visitor, interest, or bot..."
+              placeholder="Search conversations..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               style={{ padding: '0.45rem 0.85rem 0.45rem 2.2rem', fontSize: '0.825rem' }}
@@ -72,7 +68,7 @@ export const GlobalHistory = () => {
               className={`btn btn-sm ${selectedBotFilter === 'all' ? 'btn-primary' : 'btn-ghost'}`}
               onClick={() => setSelectedBotFilter('all')}
             >
-              All Bots ({conversations.length})
+              All ({conversations.length})
             </button>
             {bots.map((b) => (
               <button
@@ -94,12 +90,11 @@ export const GlobalHistory = () => {
           <table className="data-table">
             <thead>
               <tr>
-                <th>Visitor Profile</th>
-                <th>Target Assistant</th>
+                <th>Customer</th>
+                <th>Assistant</th>
                 <th>Inquiry / Requirements</th>
-                <th>Lead Status</th>
+                <th>Status</th>
                 <th>Duration</th>
-                <th>Sentiment</th>
                 <th>Time</th>
                 <th style={{ textAlign: 'right' }}>Action</th>
               </tr>
@@ -108,19 +103,20 @@ export const GlobalHistory = () => {
               {filteredConversations.map((conv) => (
                 <tr key={conv.id}>
                   <td>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2.5">
                       <div 
                         style={{
-                          width: '28px',
-                          height: '28px',
+                          width: '30px',
+                          height: '30px',
                           borderRadius: '50%',
-                          background: 'var(--primary-subtle)',
+                          backgroundColor: 'var(--accent-soft-surface)',
                           color: 'var(--primary)',
                           display: 'flex',
                           alignItems: 'center',
                           justifyContent: 'center',
                           fontWeight: 700,
-                          fontSize: '0.75rem'
+                          fontSize: '0.75rem',
+                          flexShrink: 0
                         }}
                       >
                         {conv.userName.charAt(0)}
@@ -156,11 +152,6 @@ export const GlobalHistory = () => {
                   <td style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
                     {conv.duration}
                   </td>
-                  <td>
-                    <span className="text-success font-mono" style={{ fontSize: '0.75rem' }}>
-                      {conv.sentiment.split(' ')[0]}
-                    </span>
-                  </td>
                   <td style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
                     {conv.timestamp}
                   </td>
@@ -169,7 +160,7 @@ export const GlobalHistory = () => {
                       className="btn btn-secondary btn-sm"
                       onClick={() => navigate(`/bots/${conv.botId}/conversations`)}
                     >
-                      <span>View Chat</span>
+                      <span>View Thread</span>
                       <ExternalLink size={12} />
                     </button>
                   </td>

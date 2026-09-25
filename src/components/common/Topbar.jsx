@@ -1,21 +1,18 @@
 import React, { useState } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { 
   Menu, 
   Search, 
   Bell, 
-  ChevronDown, 
-  Sparkles, 
   ExternalLink,
-  Bot,
-  Plus
+  Plus,
+  Play
 } from 'lucide-react';
 import { usePlatform } from '../../context/PlatformContext';
 
 export const Topbar = ({ onToggleMobile }) => {
   const { currentUser, bots } = usePlatform();
   const navigate = useNavigate();
-  const location = useLocation();
   const [searchQuery, setSearchQuery] = useState('');
   const [showSearchDropdown, setShowSearchDropdown] = useState(false);
 
@@ -26,7 +23,7 @@ export const Topbar = ({ onToggleMobile }) => {
 
   return (
     <header className="app-topbar">
-      {/* Left: Mobile Toggle & Quick Search */}
+      {/* Left: Mobile Toggle & Search */}
       <div className="topbar-left">
         <button 
           className="mobile-menu-toggle btn btn-ghost btn-icon" 
@@ -42,7 +39,7 @@ export const Topbar = ({ onToggleMobile }) => {
             <input 
               type="text" 
               className="form-input has-left-icon" 
-              placeholder="Search bots, properties, chats..."
+              placeholder="Search assistants, projects..."
               value={searchQuery}
               onChange={(e) => {
                 setSearchQuery(e.target.value);
@@ -54,7 +51,7 @@ export const Topbar = ({ onToggleMobile }) => {
             />
           </div>
 
-          {/* Quick Search Autocomplete Dropdown */}
+          {/* Quick Autocomplete Dropdown */}
           {showSearchDropdown && searchQuery.trim() && (
             <div 
               style={{
@@ -64,16 +61,16 @@ export const Topbar = ({ onToggleMobile }) => {
                 right: 0,
                 background: 'var(--bg-surface)',
                 border: '1px solid var(--border-default)',
-                borderRadius: 'var(--radius-lg)',
-                boxShadow: 'var(--shadow-xl)',
+                borderRadius: 'var(--radius-md)',
+                boxShadow: 'var(--shadow-lg)',
                 zIndex: 100,
-                padding: '0.5rem',
-                maxHeight: '280px',
+                padding: '0.4rem',
+                maxHeight: '260px',
                 overflowY: 'auto'
               }}
             >
-              <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', padding: '0.25rem 0.5rem', fontWeight: 600 }}>
-                MATCHING AI BOTS
+              <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', padding: '0.25rem 0.5rem', fontWeight: 700, textTransform: 'uppercase' }}>
+                Matching Assistants
               </div>
               {filteredBots.length > 0 ? (
                 filteredBots.map((bot) => (
@@ -82,7 +79,7 @@ export const Topbar = ({ onToggleMobile }) => {
                     className="flex items-center gap-2 cursor-pointer"
                     style={{
                       padding: '0.5rem',
-                      borderRadius: 'var(--radius-md)',
+                      borderRadius: 'var(--radius-sm)',
                       transition: 'background 0.15s'
                     }}
                     onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--bg-surface-elevated)')}
@@ -95,10 +92,10 @@ export const Topbar = ({ onToggleMobile }) => {
                   >
                     <span>{bot.avatar}</span>
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-primary)' }} className="truncate">
+                      <div style={{ fontSize: '0.825rem', fontWeight: 600, color: 'var(--text-primary)' }} className="truncate">
                         {bot.name}
                       </div>
-                      <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                      <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
                         {bot.industryName}
                       </div>
                     </div>
@@ -106,7 +103,7 @@ export const Topbar = ({ onToggleMobile }) => {
                 ))
               ) : (
                 <div style={{ padding: '0.75rem', fontSize: '0.8rem', color: 'var(--text-muted)', textAlign: 'center' }}>
-                  No matching bots found
+                  No matching assistants found
                 </div>
               )}
             </div>
@@ -114,52 +111,42 @@ export const Topbar = ({ onToggleMobile }) => {
         </div>
       </div>
 
-      {/* Right: Quick Launch, Public Chat Preview & Profile */}
+      {/* Right: Live Preview & User Status */}
       <div className="topbar-right">
-        {/* Flagship Prycoons Chat Preview CTA */}
+        {/* Customer Chat Preview CTA */}
         <button 
           className="btn btn-outline btn-sm"
           onClick={() => window.open('/chat/prycoons-ai', '_blank')}
-          title="Open live interactive customer chat window in new tab"
+          title="Open customer assistant preview in new window"
         >
-          <Sparkles size={14} style={{ color: '#3b82f6' }} />
-          <span>Live Demo: Prycoons AI</span>
+          <Play size={13} style={{ color: 'var(--primary)' }} />
+          <span>Preview Assistant</span>
           <ExternalLink size={12} style={{ opacity: 0.6 }} />
         </button>
 
-        {/* Create Bot Button */}
-        <button 
-          className="btn btn-primary btn-sm"
-          onClick={() => navigate('/bots/create')}
-        >
-          <Plus size={14} />
-          <span>New Bot</span>
-        </button>
-
-        {/* Notifications Icon with indicator dot */}
+        {/* Notifications */}
         <div style={{ position: 'relative' }}>
           <button className="btn btn-ghost btn-sm btn-icon" aria-label="Notifications">
-            <Bell size={18} />
+            <Bell size={17} />
           </button>
           <span 
             style={{
               position: 'absolute',
               top: '6px',
               right: '6px',
-              width: '7px',
-              height: '7px',
+              width: '6px',
+              height: '6px',
               borderRadius: '50%',
-              backgroundColor: 'var(--accent-rose)',
-              boxShadow: '0 0 6px var(--accent-rose)'
+              backgroundColor: 'var(--primary)'
             }} 
           />
         </div>
 
-        {/* Current Plan Badge */}
+        {/* Plan Badge */}
         <div 
           className="badge badge-primary cursor-pointer"
           onClick={() => navigate('/pricing')}
-          title="Click to view plan details"
+          title="View workspace subscription"
         >
           {currentUser?.plan || 'Growth Pro'}
         </div>

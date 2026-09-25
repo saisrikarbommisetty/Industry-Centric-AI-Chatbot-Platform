@@ -3,24 +3,20 @@ import { NavLink, useNavigate } from 'react-router-dom';
 import { 
   LayoutDashboard, 
   Bot, 
-  MessageSquareText, 
+  MessageSquare, 
   BarChart3, 
   CreditCard, 
   Settings, 
-  HelpCircle, 
-  User, 
-  Sparkles, 
   Plus, 
   Moon, 
   Sun,
   X,
-  ExternalLink,
   LogOut
 } from 'lucide-react';
 import { usePlatform } from '../../context/PlatformContext';
 
 export const Sidebar = ({ mobileOpen, setMobileOpen }) => {
-  const { theme, toggleTheme, currentUser, bots, switchUser, logoutUser } = usePlatform();
+  const { theme, toggleTheme, currentUser, bots, logoutUser } = usePlatform();
   const navigate = useNavigate();
 
   const handleNavClick = () => {
@@ -31,21 +27,20 @@ export const Sidebar = ({ mobileOpen, setMobileOpen }) => {
     <aside className={`app-sidebar ${mobileOpen ? 'mobile-open' : ''}`}>
       {/* Sidebar Header */}
       <div className="sidebar-header">
-        <div className="brand-logo">
-          <Sparkles size={18} />
-        </div>
+        <div className="brand-logo">B</div>
         <div className="brand-info">
           <div className="brand-name">
-            NexusAI
+            BRIM AI
             <span className="brand-badge">PRO</span>
           </div>
-          <span className="brand-tagline">Industry Chatbot Suite</span>
+          <span className="brand-tagline">Conversational Assistant</span>
         </div>
         {mobileOpen && (
           <button 
             className="btn btn-ghost btn-sm btn-icon" 
             style={{ marginLeft: 'auto' }}
             onClick={() => setMobileOpen(false)}
+            aria-label="Close menu"
           >
             <X size={18} />
           </button>
@@ -54,71 +49,50 @@ export const Sidebar = ({ mobileOpen, setMobileOpen }) => {
 
       {/* Sidebar Navigation Body */}
       <div className="sidebar-body">
-        {/* Quick CTA */}
+        {/* Quick Create CTA */}
         <div>
           <button 
             className="btn btn-primary w-full"
-            style={{ padding: '0.65rem', justifyContent: 'center' }}
+            style={{ padding: '0.6rem 0.85rem', justifyContent: 'center' }}
             onClick={() => { navigate('/bots/create'); handleNavClick(); }}
           >
             <Plus size={16} />
-            <span>Create New Bot</span>
+            <span>Create Assistant</span>
           </button>
         </div>
 
-        {/* Platform Section */}
+        {/* Main Navigation */}
         <div className="nav-section">
-          <span className="nav-section-title">Core Platform</span>
           <NavLink to="/" end className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`} onClick={handleNavClick}>
             <LayoutDashboard size={18} />
-            <span>Dashboard</span>
+            <span>Overview</span>
           </NavLink>
           <NavLink to="/bots" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`} onClick={handleNavClick}>
             <Bot size={18} />
-            <span>My AI Bots</span>
+            <span>Assistants</span>
             <span className="nav-item-badge">{bots.length}</span>
           </NavLink>
           <NavLink to="/global-history" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`} onClick={handleNavClick}>
-            <MessageSquareText size={18} />
-            <span>Chat History</span>
+            <MessageSquare size={18} />
+            <span>Conversations</span>
           </NavLink>
           <NavLink to="/global-analytics" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`} onClick={handleNavClick}>
             <BarChart3 size={18} />
-            <span>Global Analytics</span>
+            <span>Analytics</span>
           </NavLink>
         </div>
 
-        {/* Active Industry Bots Quick List */}
-        <div className="nav-section">
-          <span className="nav-section-title">Featured Showcase</span>
-          {bots.slice(0, 3).map((bot) => (
-            <NavLink 
-              key={bot.id} 
-              to={`/bots/${bot.id}/overview`} 
-              className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
-              onClick={handleNavClick}
-              title={bot.name}
-            >
-              <span style={{ fontSize: '1.1rem' }}>{bot.avatar}</span>
-              <span className="truncate">{bot.name}</span>
-            </NavLink>
-          ))}
-        </div>
+        <div className="nav-divider" />
 
-        {/* Account & Administration */}
+        {/* Workspace & Settings */}
         <div className="nav-section">
-          <span className="nav-section-title">Account & Billing</span>
           <NavLink to="/pricing" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`} onClick={handleNavClick}>
             <CreditCard size={18} />
-            <span>Pricing & Plans</span>
+            <span>Pricing</span>
           </NavLink>
           <NavLink to="/account" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`} onClick={handleNavClick}>
-            <User size={18} />
-            <span>Account & Team</span>
-          </NavLink>
-          <NavLink to="/help" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`} onClick={handleNavClick}>
-            <HelpCircle size={18} />
-            <span>Help & Guides</span>
+            <Settings size={18} />
+            <span>Settings</span>
           </NavLink>
         </div>
       </div>
@@ -126,22 +100,22 @@ export const Sidebar = ({ mobileOpen, setMobileOpen }) => {
       {/* Sidebar Footer with Theme & User Profile */}
       <div className="sidebar-footer">
         <div className="flex items-center justify-between" style={{ marginBottom: '0.75rem' }}>
-          <span className="text-muted" style={{ fontSize: '0.75rem' }}>Appearance</span>
+          <span className="text-muted" style={{ fontSize: '0.75rem', fontWeight: 500 }}>Theme</span>
           <button 
             className="btn btn-ghost btn-sm btn-icon" 
             onClick={toggleTheme}
             title={`Switch to ${theme === 'dark' ? 'Light' : 'Dark'} mode`}
           >
-            {theme === 'dark' ? <Sun size={16} style={{ color: '#fbbf24' }} /> : <Moon size={16} />}
+            {theme === 'dark' ? <Sun size={15} style={{ color: '#F59E0B' }} /> : <Moon size={15} />}
           </button>
         </div>
 
         <div className="flex items-center justify-between gap-1">
           <div className="user-card" style={{ flex: 1, minWidth: 0 }} onClick={() => navigate('/account')}>
-            <div className="user-avatar">{currentUser?.avatar || 'U'}</div>
+            <div className="user-avatar">{currentUser?.avatar || 'SS'}</div>
             <div className="user-details">
-              <div className="user-name">{currentUser?.name || 'User'}</div>
-              <div className="user-role">{currentUser?.role || 'Workspace Member'}</div>
+              <div className="user-name">{currentUser?.name || 'Sai Srikar'}</div>
+              <div className="user-role">{currentUser?.role || 'Client Director'}</div>
             </div>
           </div>
 

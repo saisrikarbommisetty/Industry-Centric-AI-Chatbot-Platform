@@ -28,24 +28,24 @@ export const BotNav = () => {
           <button 
             className="btn btn-ghost btn-sm btn-icon" 
             onClick={() => navigate('/bots')}
-            title="Back to all bots"
+            title="Back to all assistants"
           >
             <ArrowLeft size={18} />
           </button>
 
-          <div className="bot-avatar-badge">{currentBot?.avatar || '🤖'}</div>
+          <div className="bot-avatar-badge">{currentBot?.avatar || '🏢'}</div>
 
           <div className="bot-meta">
             <div className="bot-meta-title">
-              {currentBot?.name || 'Industry AI Assistant'}
+              {currentBot?.name || 'BRIM Assistant'}
               <span className={`status-dot ${currentBot?.status === 'active' ? 'active' : 'idle'}`} title={`Status: ${currentBot?.status}`} />
             </div>
             <div className="bot-meta-sub">
-              <span className="badge badge-primary">{currentBot?.industryName || 'Industry Bot'}</span>
-              <span>•</span>
-              <span>{currentBot?.model || 'Gemini 1.5 Pro'}</span>
+              <span className="badge badge-primary">{currentBot?.industryName || 'Real Estate'}</span>
               <span>•</span>
               <span>{currentBot?.sourcesCount || 0} Knowledge Sources</span>
+              <span>•</span>
+              <span>Active</span>
             </div>
           </div>
         </div>
@@ -55,10 +55,10 @@ export const BotNav = () => {
           <button 
             className="btn btn-outline btn-sm"
             onClick={() => window.open(`/chat/${currentBot?.id}`, '_blank')}
-            title="Open live customer preview in new tab"
+            title="Open customer assistant preview in new tab"
           >
-            <Play size={14} style={{ color: '#10b981' }} />
-            <span>Customer View</span>
+            <Play size={13} style={{ color: 'var(--primary)' }} />
+            <span>Preview Assistant</span>
             <ExternalLink size={12} style={{ opacity: 0.6 }} />
           </button>
           
@@ -67,7 +67,7 @@ export const BotNav = () => {
             onClick={() => navigate(`/bots/${currentBot?.id}/share`)}
           >
             <Share2 size={14} />
-            <span>Deploy & Share</span>
+            <span>Share</span>
           </button>
         </div>
       </div>
@@ -78,7 +78,7 @@ export const BotNav = () => {
           to={`/bots/${currentBot?.id}/overview`} 
           className={({ isActive }) => `bot-tab-link ${isActive ? 'active' : ''}`}
         >
-          <Activity size={16} />
+          <Activity size={15} />
           <span>Overview</span>
         </NavLink>
 
@@ -86,39 +86,39 @@ export const BotNav = () => {
           to={`/bots/${currentBot?.id}/conversations`} 
           className={({ isActive }) => `bot-tab-link ${isActive ? 'active' : ''}`}
         >
-          <MessageSquare size={16} />
-          <span>Chat History</span>
-        </NavLink>
-
-        <NavLink 
-          to={`/bots/${currentBot?.id}/analytics`} 
-          className={({ isActive }) => `bot-tab-link ${isActive ? 'active' : ''}`}
-        >
-          <BarChart2 size={16} />
-          <span>Analytics</span>
+          <MessageSquare size={15} />
+          <span>Conversations</span>
         </NavLink>
 
         <NavLink 
           to={`/bots/${currentBot?.id}/knowledge`} 
           className={({ isActive }) => `bot-tab-link ${isActive ? 'active' : ''}`}
         >
-          <BookOpen size={16} />
-          <span>Knowledge Base</span>
+          <BookOpen size={15} />
+          <span>Knowledge</span>
+        </NavLink>
+
+        <NavLink 
+          to={`/bots/${currentBot?.id}/analytics`} 
+          className={({ isActive }) => `bot-tab-link ${isActive ? 'active' : ''}`}
+        >
+          <BarChart2 size={15} />
+          <span>Analytics</span>
         </NavLink>
 
         <NavLink 
           to={`/bots/${currentBot?.id}/share`} 
           className={({ isActive }) => `bot-tab-link ${isActive ? 'active' : ''}`}
         >
-          <Share2 size={16} />
-          <span>Share & Embed</span>
+          <Share2 size={15} />
+          <span>Share</span>
         </NavLink>
 
         <NavLink 
           to={`/bots/${currentBot?.id}/settings`} 
           className={({ isActive }) => `bot-tab-link ${isActive ? 'active' : ''}`}
         >
-          <Settings size={16} />
+          <Settings size={15} />
           <span>Settings</span>
         </NavLink>
       </div>

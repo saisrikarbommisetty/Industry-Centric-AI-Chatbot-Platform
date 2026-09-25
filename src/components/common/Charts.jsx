@@ -1,12 +1,12 @@
 import React, { useState } from 'react';
 
-// Crisp Responsive SVG Area & Line Chart for Daily Volume & Leads
+// Responsive SVG Area & Line Chart for Daily Inquiries & Leads
 export const VolumeAreaChart = ({ data = [] }) => {
   const [hoveredIdx, setHoveredIdx] = useState(null);
 
   if (!data || data.length === 0) return null;
 
-  const maxTotal = Math.max(...data.map((d) => d.total), 250);
+  const maxTotal = Math.max(...data.map((d) => d.total), 70);
   const width = 500;
   const height = 180;
   const paddingX = 35;
@@ -23,15 +23,15 @@ export const VolumeAreaChart = ({ data = [] }) => {
 
   return (
     <div style={{ width: '100%', position: 'relative' }}>
-      <div className="flex items-center justify-between" style={{ marginBottom: '0.75rem' }}>
+      <div className="flex items-center justify-between" style={{ marginBottom: '0.85rem' }}>
         <div className="flex items-center gap-4" style={{ fontSize: '0.78rem' }}>
-          <div className="flex items-center gap-2">
-            <span style={{ width: 10, height: 10, borderRadius: 2, background: '#3b82f6', display: 'inline-block' }} />
-            <span className="text-secondary">Total Conversations</span>
+          <div className="flex items-center gap-1.5">
+            <span style={{ width: 10, height: 10, borderRadius: 2, background: '#C85C4A', display: 'inline-block' }} />
+            <span className="text-secondary" style={{ fontWeight: 500 }}>Conversations</span>
           </div>
-          <div className="flex items-center gap-2">
-            <span style={{ width: 10, height: 10, borderRadius: 2, background: '#10b981', display: 'inline-block' }} />
-            <span className="text-secondary">Qualified Leads Captured</span>
+          <div className="flex items-center gap-1.5">
+            <span style={{ width: 10, height: 10, borderRadius: 2, background: '#2D7A5E', display: 'inline-block' }} />
+            <span className="text-secondary" style={{ fontWeight: 500 }}>Inquiries & Leads</span>
           </div>
         </div>
       </div>
@@ -39,12 +39,12 @@ export const VolumeAreaChart = ({ data = [] }) => {
       <svg viewBox={`0 0 ${width} ${height}`} style={{ width: '100%', height: 'auto', overflow: 'visible' }}>
         <defs>
           <linearGradient id="totalGrad" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#3b82f6" stopOpacity="0.25" />
-            <stop offset="100%" stopColor="#3b82f6" stopOpacity="0.0" />
+            <stop offset="0%" stopColor="#C85C4A" stopOpacity="0.2" />
+            <stop offset="100%" stopColor="#C85C4A" stopOpacity="0.0" />
           </linearGradient>
           <linearGradient id="leadsGrad" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#10b981" stopOpacity="0.3" />
-            <stop offset="100%" stopColor="#10b981" stopOpacity="0.0" />
+            <stop offset="0%" stopColor="#2D7A5E" stopOpacity="0.25" />
+            <stop offset="100%" stopColor="#2D7A5E" stopOpacity="0.0" />
           </linearGradient>
         </defs>
 
@@ -69,8 +69,8 @@ export const VolumeAreaChart = ({ data = [] }) => {
         <polygon points={leadsArea} fill="url(#leadsGrad)" />
 
         {/* Lines */}
-        <polyline points={totalPoints} fill="none" stroke="#3b82f6" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
-        <polyline points={leadsPoints} fill="none" stroke="#10b981" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+        <polyline points={totalPoints} fill="none" stroke="#C85C4A" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+        <polyline points={leadsPoints} fill="none" stroke="#2D7A5E" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
 
         {/* Points & Labels */}
         {data.map((d, i) => {
@@ -79,9 +79,9 @@ export const VolumeAreaChart = ({ data = [] }) => {
           const yLeads = getY(d.leads);
           return (
             <g key={i} onMouseEnter={() => setHoveredIdx(i)} onMouseLeave={() => setHoveredIdx(null)} style={{ cursor: 'pointer' }}>
-              <circle cx={x} cy={yTotal} r={hoveredIdx === i ? 5 : 3.5} fill="#3b82f6" stroke="var(--bg-surface)" strokeWidth="2" />
-              <circle cx={x} cy={yLeads} r={hoveredIdx === i ? 4.5 : 3} fill="#10b981" stroke="var(--bg-surface)" strokeWidth="2" />
-              <text x={x} y={height - 6} textAnchor="middle" fill="var(--text-muted)" fontSize="10">
+              <circle cx={x} cy={yTotal} r={hoveredIdx === i ? 5 : 3.5} fill="#C85C4A" stroke="var(--bg-card)" strokeWidth="2" />
+              <circle cx={x} cy={yLeads} r={hoveredIdx === i ? 4.5 : 3} fill="#2D7A5E" stroke="var(--bg-card)" strokeWidth="2" />
+              <text x={x} y={height - 6} textAnchor="middle" fill="var(--text-muted)" fontSize="10" fontWeight="500">
                 {d.date}
               </text>
             </g>
@@ -96,21 +96,21 @@ export const VolumeAreaChart = ({ data = [] }) => {
             position: 'absolute',
             top: 20,
             left: `${(hoveredIdx / (data.length - 1)) * 75 + 10}%`,
-            background: 'var(--bg-surface-elevated)',
+            background: 'var(--bg-surface)',
             border: '1px solid var(--border-default)',
             borderRadius: 'var(--radius-md)',
-            padding: '0.4rem 0.6rem',
+            padding: '0.4rem 0.65rem',
             boxShadow: 'var(--shadow-md)',
             pointerEvents: 'none',
             zIndex: 10,
             fontSize: '0.75rem'
           }}
         >
-          <div style={{ fontWeight: 600, color: 'var(--text-primary)', marginBottom: '0.2rem' }}>
+          <div style={{ fontWeight: 700, color: 'var(--text-primary)', marginBottom: '0.2rem' }}>
             {data[hoveredIdx].date}
           </div>
-          <div style={{ color: '#60a5fa' }}>Chats: {data[hoveredIdx].total}</div>
-          <div style={{ color: '#34d399' }}>Leads: {data[hoveredIdx].leads}</div>
+          <div style={{ color: '#C85C4A', fontWeight: 600 }}>Conversations: {data[hoveredIdx].total}</div>
+          <div style={{ color: '#2D7A5E', fontWeight: 600 }}>Leads: {data[hoveredIdx].leads}</div>
         </div>
       )}
     </div>
@@ -124,7 +124,7 @@ export const BhkBarChart = ({ distribution = [] }) => {
       {distribution.map((item, idx) => (
         <div key={idx} className="flex flex-col gap-1">
           <div className="flex items-center justify-between" style={{ fontSize: '0.8rem' }}>
-            <span style={{ fontWeight: 500, color: 'var(--text-primary)' }}>{item.label}</span>
+            <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{item.label}</span>
             <span style={{ color: 'var(--text-muted)' }}>
               {item.count} inquiries ({item.percentage}%)
             </span>
@@ -132,7 +132,7 @@ export const BhkBarChart = ({ distribution = [] }) => {
           <div
             style={{
               width: '100%',
-              height: '8px',
+              height: '7px',
               backgroundColor: 'var(--bg-surface-elevated)',
               borderRadius: 'var(--radius-full)',
               overflow: 'hidden'
@@ -160,7 +160,7 @@ export const SentimentDonutChart = ({ items = [] }) => {
 
   return (
     <div className="flex items-center gap-6" style={{ width: '100%' }}>
-      <div style={{ width: '120px', height: '120px', position: 'relative', flexShrink: 0 }}>
+      <div style={{ width: '110px', height: '110px', position: 'relative', flexShrink: 0 }}>
         <svg viewBox="0 0 36 36" style={{ width: '100%', height: '100%', transform: 'rotate(-90deg)' }}>
           {items.map((item, index) => {
             const strokeDasharray = `${item.percentage} ${100 - item.percentage}`;
@@ -175,7 +175,7 @@ export const SentimentDonutChart = ({ items = [] }) => {
                 r="15.91549430918954"
                 fill="transparent"
                 stroke={item.color}
-                strokeWidth="3.8"
+                strokeWidth="3.6"
                 strokeDasharray={strokeDasharray}
                 strokeDashoffset={strokeDashoffset}
               />
@@ -192,8 +192,8 @@ export const SentimentDonutChart = ({ items = [] }) => {
             justifyContent: 'center'
           }}
         >
-          <span style={{ fontSize: '1.25rem', fontWeight: 700, color: 'var(--text-primary)' }}>97%</span>
-          <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>Positive</span>
+          <span style={{ fontSize: '1.2rem', fontWeight: 800, color: 'var(--text-primary)', fontFamily: 'Plus Jakarta Sans, sans-serif' }}>92%</span>
+          <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)', fontWeight: 500 }}>Positive</span>
         </div>
       </div>
 
@@ -212,7 +212,7 @@ export const SentimentDonutChart = ({ items = [] }) => {
   );
 };
 
-// Hourly Heatmap Load Grid
+// Hourly Load Grid
 export const HourlyHeatmap = ({ heatmap = [] }) => {
   return (
     <div className="grid-4" style={{ gap: '0.5rem' }}>
@@ -224,14 +224,14 @@ export const HourlyHeatmap = ({ heatmap = [] }) => {
             style={{
               padding: '0.6rem',
               borderRadius: 'var(--radius-md)',
-              background: `rgba(59, 130, 246, ${Math.max(0.12, opacity * 0.8)})`,
+              background: `rgba(200, 92, 74, ${Math.max(0.1, opacity * 0.7)})`,
               border: '1px solid var(--border-subtle)',
               textAlign: 'center'
             }}
           >
             <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>{item.hour}</div>
-            <div style={{ fontSize: '0.9rem', fontWeight: 700, color: opacity > 0.6 ? '#ffffff' : 'var(--text-primary)' }}>
-              {item.load}% Peak
+            <div style={{ fontSize: '0.875rem', fontWeight: 700, color: 'var(--text-primary)' }}>
+              {item.load}%
             </div>
           </div>
         );

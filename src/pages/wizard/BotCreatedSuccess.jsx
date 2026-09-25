@@ -5,13 +5,9 @@ import {
   Copy, 
   Check, 
   ExternalLink, 
-  Share2, 
-  Code, 
-  QrCode, 
   ArrowRight, 
-  Sparkles,
-  Bot,
-  Activity
+  Activity,
+  Play
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { usePlatform } from '../../context/PlatformContext';
@@ -25,13 +21,13 @@ export const BotCreatedSuccess = () => {
 
   const currentBot = bots.find((b) => b.id === botId) || bots[0];
   const publicUrl = `${window.location.origin}/chat/${currentBot?.id || 'prycoons-ai'}`;
-  const embedCode = `<script src="https://cdn.nexusai.com/widget.js" data-bot-id="${currentBot?.id || 'prycoons-ai'}" data-color="${currentBot?.primaryColor || '#3b82f6'}" async></script>`;
+  const embedCode = `<script src="https://cdn.brimai.com/widget.js" data-assistant-id="${currentBot?.id || 'prycoons-ai'}" async></script>`;
 
   useEffect(() => {
     try {
       confetti({
-        particleCount: 90,
-        spread: 70,
+        particleCount: 60,
+        spread: 60,
         origin: { y: 0.6 }
       });
     } catch (e) {
@@ -42,7 +38,7 @@ export const BotCreatedSuccess = () => {
   const handleCopyLink = () => {
     navigator.clipboard.writeText(publicUrl);
     setCopiedLink(true);
-    addToast('Public chat URL copied to clipboard!', 'success');
+    addToast('Public assistant link copied to clipboard!', 'success');
     setTimeout(() => setCopiedLink(false), 2000);
   };
 
@@ -54,53 +50,52 @@ export const BotCreatedSuccess = () => {
   };
 
   return (
-    <div className="page-container" style={{ maxWidth: '820px' }}>
+    <div className="page-container" style={{ maxWidth: '780px' }}>
       <div 
         className="card"
         style={{
           textAlign: 'center',
-          padding: '3rem 2rem',
+          padding: '3rem 2.25rem',
           borderRadius: 'var(--radius-xl)',
-          background: 'radial-gradient(ellipse at 50% 10%, rgba(16, 185, 129, 0.15), var(--bg-surface) 70%)',
+          backgroundColor: '#FFFFFF',
           border: '1px solid var(--border-default)',
-          boxShadow: 'var(--shadow-xl)'
+          boxShadow: 'var(--shadow-md)'
         }}
       >
-        {/* Animated Celebration Icon */}
+        {/* Success Icon */}
         <div 
           style={{
-            width: '72px',
-            height: '72px',
+            width: '64px',
+            height: '64px',
             borderRadius: '50%',
-            background: 'rgba(16, 185, 129, 0.15)',
-            border: '2px solid rgba(16, 185, 129, 0.4)',
-            color: '#34d399',
+            backgroundColor: 'var(--accent-emerald-subtle)',
+            border: '2px solid var(--accent-emerald)',
+            color: 'var(--accent-emerald)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            margin: '0 auto 1.25rem',
-            boxShadow: '0 0 30px rgba(16, 185, 129, 0.3)'
+            margin: '0 auto 1.25rem'
           }}
         >
-          <CheckCircle2 size={38} />
+          <CheckCircle2 size={34} />
         </div>
 
         <span className="badge badge-success" style={{ marginBottom: '0.6rem' }}>
-          Deployment Complete
+          Assistant Ready
         </span>
 
-        <h1 style={{ fontSize: '2rem', fontWeight: 800, marginBottom: '0.5rem' }}>
-          {currentBot?.name || 'Industry Assistant'} is Live!
+        <h1 style={{ fontSize: '1.85rem', fontWeight: 800, marginBottom: '0.4rem' }}>
+          {currentBot?.name || 'BRIM Assistant'} is Ready!
         </h1>
 
-        <p style={{ fontSize: '0.95rem', color: 'var(--text-secondary)', maxWidth: '520px', margin: '0 auto 2rem' }}>
-          Your AI assistant is fully vectorized, indexed, and ready to engage real-estate buyers, qualify leads, and answer domain queries.
+        <p style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', maxWidth: '500px', margin: '0 auto 2rem', lineHeight: 1.55 }}>
+          Your assistant knowledge base is synchronized. You can preview the customer chat or share the direct link.
         </p>
 
         {/* Shareable Link Box */}
         <div 
           style={{
-            background: 'var(--bg-surface-elevated)',
+            background: 'var(--bg-app)',
             border: '1px solid var(--border-default)',
             borderRadius: 'var(--radius-lg)',
             padding: '1.25rem',
@@ -109,10 +104,10 @@ export const BotCreatedSuccess = () => {
           }}
         >
           <div className="flex items-center justify-between" style={{ marginBottom: '0.5rem' }}>
-            <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-muted)' }}>
-              PUBLIC CHATBOT SHAREABLE URL
+            <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
+              Direct Shareable Link
             </span>
-            <span className="badge badge-primary">Direct Access</span>
+            <span className="badge badge-primary">Active</span>
           </div>
 
           <div className="flex gap-2">
@@ -124,23 +119,23 @@ export const BotCreatedSuccess = () => {
               style={{ fontSize: '0.825rem' }}
             />
             <button className="btn btn-secondary btn-sm" onClick={handleCopyLink}>
-              {copiedLink ? <Check size={14} style={{ color: '#34d399' }} /> : <Copy size={14} />}
+              {copiedLink ? <Check size={14} style={{ color: 'var(--accent-emerald)' }} /> : <Copy size={14} />}
               <span>{copiedLink ? 'Copied' : 'Copy'}</span>
             </button>
             <button 
-              className="btn btn-primary btn-sm"
+              className="btn btn-outline btn-sm"
               onClick={() => window.open(`/chat/${currentBot?.id}`, '_blank')}
             >
               <ExternalLink size={14} />
-              <span>Preview</span>
+              <span>Open</span>
             </button>
           </div>
         </div>
 
-        {/* Quick Embed Snippet Box */}
+        {/* Quick Embed Box */}
         <div 
           style={{
-            background: 'var(--bg-surface-elevated)',
+            background: 'var(--bg-app)',
             border: '1px solid var(--border-default)',
             borderRadius: 'var(--radius-lg)',
             padding: '1.25rem',
@@ -149,25 +144,25 @@ export const BotCreatedSuccess = () => {
           }}
         >
           <div className="flex items-center justify-between" style={{ marginBottom: '0.5rem' }}>
-            <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-muted)' }}>
-              WEBSITE EMBED WIDGET CODE
+            <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
+              Website Embed Code
             </span>
             <button className="btn btn-ghost btn-sm" onClick={handleCopyEmbed}>
-              {copiedEmbed ? <Check size={14} style={{ color: '#34d399' }} /> : <Copy size={14} />}
-              <span>{copiedEmbed ? 'Copied' : 'Copy Snippet'}</span>
+              {copiedEmbed ? <Check size={14} style={{ color: 'var(--accent-emerald)' }} /> : <Copy size={14} />}
+              <span>{copiedEmbed ? 'Copied' : 'Copy Code'}</span>
             </button>
           </div>
 
           <div 
             style={{
-              background: 'var(--bg-input)',
-              padding: '0.75rem 1rem',
+              background: '#FFFFFF',
+              padding: '0.65rem 0.85rem',
               borderRadius: 'var(--radius-md)',
-              fontSize: '0.8rem',
+              fontSize: '0.78rem',
               fontFamily: 'JetBrains Mono, monospace',
-              color: '#93c5fd',
+              color: 'var(--text-primary)',
               overflowX: 'auto',
-              border: '1px solid var(--border-subtle)'
+              border: '1px solid var(--border-default)'
             }}
           >
             {embedCode}
@@ -180,17 +175,16 @@ export const BotCreatedSuccess = () => {
             className="btn btn-secondary btn-lg"
             onClick={() => navigate(`/bots/${currentBot?.id}/overview`)}
           >
-            <Activity size={18} />
-            <span>Manage Bot Suite</span>
+            <Activity size={17} />
+            <span>Manage Assistant</span>
           </button>
 
           <button 
             className="btn btn-primary btn-lg"
             onClick={() => window.open(`/chat/${currentBot?.id}`, '_blank')}
-            style={{ background: 'var(--grad-primary)', border: 'none' }}
           >
-            <Sparkles size={18} />
-            <span>Open Live Customer Chat</span>
+            <Play size={16} />
+            <span>Preview Customer Assistant</span>
             <ExternalLink size={14} />
           </button>
         </div>
