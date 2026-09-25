@@ -30,31 +30,6 @@ Customer-Facing Assistant Preview (/chat/:botId)
 
 ---
 
-## 🎨 BRIM Visual Design System
-
-- **Warm Light Palette**:
-  - Base: `#F7F3EC` (Warm ivory / cream)
-  - Surface: `#FFFDF9` (Warm white)
-  - Charcoal Typography: `#25221F`
-  - Brand Accent: `#C85C4A` (Sophisticated warm terracotta)
-  - Secondary Accent: `#C99A52` (Muted warm gold / ochre)
-  - Accent Surface: `#F5EAE4`
-- **Typography & Composition**:
-  - Headings in `Plus Jakarta Sans`, UI text in `Inter`.
-  - Editorial spacing, balanced hierarchy, and clean tactile cards.
-- **Human-Centric Language**:
-  - Focused on customer and business value rather than generic "AI" branding.
-
----
-
-## 🚀 Demo Access
-
-- **Demo Credentials**:
-  - **Email**: `saisrikar@example.com`
-  - **Password**: `demo` (or any password)
-
----
-
 ## 🛠️ Tech Stack & Local Setup
 
 - **Framework**: React 18, Vite, React Router 6
