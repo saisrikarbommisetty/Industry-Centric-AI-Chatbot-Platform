@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { BotNav } from '../../components/common/BotNav';
+import { usePlatform } from '../../context/PlatformContext';
 import { 
   MessageSquare, 
   Users, 
@@ -15,7 +16,7 @@ import {
   Clock,
   Sparkles
 } from 'lucide-react';
-import { usePlatform } from '../../context/PlatformContext';
+import { createInitialSession } from '../../utils/conversationEngine';
 
 export const BotOverview = () => {
   const { botId } = useParams();
@@ -27,22 +28,22 @@ export const BotOverview = () => {
   const botConversations = conversations.filter((c) => c.botId === currentBot?.id);
 
   // Quick Live Test Panel State
-  const [messages, setMessages] = useState([
-    {
-      id: 'init-1',
-      sender: 'bot',
-      text: currentBot?.welcomeMessage || 'Hello! How can we assist you with property inquiries today?',
-      time: 'Just now'
-    }
-  ]);
+  const [session, setSession] = useState(() => createInitialSession(currentBot));
+  const [messages, setMessages] = useState(() => [session.initialMessage]);
   const [input, setInput] = useState('');
   const [copiedEmbed, setCopiedEmbed] = useState(false);
 
-  const handleSend = (e) => {
-    e.preventDefault();
-    if (!input.trim()) return;
+  // Sync on bot switch
+  React.useEffect(() => {
+    const fresh = createInitialSession(currentBot);
+    setSession(fresh);
+    setMessages([fresh.initialMessage]);
+  }, [currentBot?.id]);
 
-    const userText = input;
+  const handleSend = (textToSend = null) => {
+    const userText = textToSend || input;
+    if (!userText.trim()) return;
+
     const userMsg = {
       id: 'usr-' + Date.now(),
       sender: 'user',
@@ -54,9 +55,16 @@ export const BotOverview = () => {
     setInput('');
 
     setTimeout(() => {
-      const botResponse = sendChatMessage(currentBot.id, userText, messages);
-      setMessages((prev) => [...prev, botResponse]);
+      const { response, session: updatedSession } = sendChatMessage(currentBot.id, userText, messages, session);
+      setSession(updatedSession);
+      setMessages((prev) => [...prev, response]);
     }, 400);
+  };
+
+  const handleRestartTest = () => {
+    const fresh = createInitialSession(currentBot);
+    setSession(fresh);
+    setMessages([fresh.initialMessage]);
   };
 
   const handleCopyEmbed = () => {
@@ -259,7 +267,7 @@ export const BotOverview = () => {
                 <button 
                   className="btn btn-ghost btn-sm btn-icon"
                   title="Restart conversation"
-                  onClick={() => setMessages([{ id: 'init', sender: 'bot', text: currentBot?.welcomeMessage || 'Hello! How may we assist you today?', time: 'Just now' }])}
+                  onClick={handleRestartTest}
                 >
                   <RefreshCw size={14} />
                 </button>
@@ -288,12 +296,15 @@ export const BotOverview = () => {
 
               {/* Quick Prompt Pills */}
               <div className="suggestion-pills-bar" style={{ padding: '0.35rem 0.75rem' }}>
-                {(currentBot?.suggestedQuestions || ['Explore properties', 'Ask about pricing']).slice(0, 2).map((q, idx) => (
+                {((messages[messages.length - 1]?.quickReplies && messages[messages.length - 1].quickReplies.length > 0)
+                  ? messages[messages.length - 1].quickReplies
+                  : (currentBot?.suggestedQuestions || ['Looking to Buy 🏡', 'Thinking of Renting 🔑', 'Just Browsing ✨'])
+                ).slice(0, 3).map((q, idx) => (
                   <button 
                     key={idx}
                     type="button"
                     className="suggestion-pill"
-                    onClick={() => setInput(q)}
+                    onClick={() => handleSend(q)}
                   >
                     {q}
                   </button>
@@ -301,7 +312,13 @@ export const BotOverview = () => {
               </div>
 
               {/* Input Form */}
-              <form onSubmit={handleSend} style={{ padding: '0.65rem 0.85rem', background: 'var(--bg-surface)', borderTop: '1px solid var(--border-default)', display: 'flex', gap: '0.5rem' }}>
+              <form 
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  handleSend();
+                }} 
+                style={{ padding: '0.65rem 0.85rem', background: 'var(--bg-surface)', borderTop: '1px solid var(--border-default)', display: 'flex', gap: '0.5rem' }}
+              >
                 <input
                   type="text"
                   className="form-input"

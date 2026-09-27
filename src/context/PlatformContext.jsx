@@ -8,6 +8,11 @@ import {
   PRYCOONS_PROJECTS,
   MOCK_ANALYTICS
 } from '../data/mockData';
+import { 
+  createInitialSession, 
+  processUserMessage, 
+  getInactivityFollowUp 
+} from '../utils/conversationEngine';
 
 const PlatformContext = createContext();
 
@@ -275,127 +280,19 @@ export const PlatformProvider = ({ children }) => {
     addToast('Knowledge source updated and re-synced!', 'success');
   };
 
-  // Conversational Responses Engine
-  const sendChatMessage = (botId, userMessage, currentHistory = []) => {
+  // Conversational Intelligence Responses Engine
+  const sendChatMessage = (botId, userMessage, currentHistory = [], sessionState = null) => {
     const bot = bots.find((b) => b.id === botId) || bots[0];
-    const textLower = userMessage.toLowerCase();
+    const session = sessionState || createInitialSession(bot);
+    const { session: updatedSession, response } = processUserMessage(userMessage, session, bot);
 
-    let replyText = '';
-    let propertyCard = null;
-    let sourceCitation = null;
-    let showLeadForm = false;
-
-    // Domain matching logic for Real Estate
-    if (bot.industryId === 'real-estate' || botId === 'prycoons-ai') {
-      if (textLower.includes('sovereign') || textLower.includes('4bhk') || textLower.includes('5bhk') || textLower.includes('sky villa') || textLower.includes('mansion') || textLower.includes('bodakdev')) {
-        propertyCard = PRYCOONS_PROJECTS[0];
-        replyText = `**The Sovereign Sky Villas** is Prycoons' crown jewel luxury development in Bodakdev, Ahmedabad.\n\n` +
-          `• **Configuration**: 4 & 5 BHK Palatial Sky Villas\n` +
-          `• **Carpet Area**: 4,200 – 6,800 sq.ft.\n` +
-          `• **Price Range**: ₹4.85 Cr to ₹8.50 Cr\n` +
-          `• **Possession**: Dec 2026\n` +
-          `• **RERA Reg.**: \`PR/GJ/AHMEDABAD/AHMEDABAD_CITY/AUDA/RAA09821/220322\`\n\n` +
-          `Each sky villa features a private heated plunge pool, dedicated private elevator, and 4 automated basement parking spaces. Would you like to schedule a private tour of the experience center?`;
-        sourceCitation = 'The Sovereign Brochure & Specifications';
-      } else if (textLower.includes('gift') || textLower.includes('horizon') || textLower.includes('nri') || textLower.includes('tax') || textLower.includes('yield')) {
-        propertyCard = PRYCOONS_PROJECTS[1];
-        replyText = `**GIFT Horizon Towers** represents smart living in GIFT City SEZ, Gandhinagar.\n\n` +
-          `• **Configuration**: 2 & 3 BHK Smart Tech Residences\n` +
-          `• **Carpet Area**: 1,250 – 1,850 sq.ft.\n` +
-          `• **Price Range**: Starting at ₹95 Lakhs up to ₹1.65 Cr\n` +
-          `• **Key Highlights**: 6.8%–7.5% projected rental yields, zero stamp duty benefits for select SEZ entities, and integrated district cooling.\n\n` +
-          `Would you like to download the NRI Investment Guide or check floor plan availability?`;
-        sourceCitation = 'GIFT Horizon Investment Guide';
-      } else if (textLower.includes('emerald') || textLower.includes('science city') || textLower.includes('3bhk') || textLower.includes('sola')) {
-        propertyCard = PRYCOONS_PROJECTS[2];
-        replyText = `**Prycoons Emerald Heights** is our premium residential community on Science City Road, Sola.\n\n` +
-          `• **Configuration**: 3 BHK Luxury Living\n` +
-          `• **Carpet Area**: 1,950 – 2,400 sq.ft.\n` +
-          `• **Price Range**: ₹1.35 Cr to ₹1.85 Cr\n` +
-          `• **Amenities**: 30,000 sq.ft. clubhouse, squash courts, zen garden, and 3-tier biometric security.\n` +
-          `• **RERA No.**: \`PR/GJ/AHMEDABAD/DASKROI/AUDA/RAA11045/050823\`\n\n` +
-          `Sample flats are ready for walkthrough! Shall I assist you with scheduling a site visit?`;
-        sourceCitation = 'Emerald Heights Project Details';
-      } else if (textLower.includes('capital') || textLower.includes('commercial') || textLower.includes('office') || textLower.includes('retail') || textLower.includes('sg highway')) {
-        propertyCard = PRYCOONS_PROJECTS[3];
-        replyText = `**Prycoons Capital Square** is a landmark commercial hub on main SG Highway near Vaishnodevi Circle.\n\n` +
-          `• **Units**: Retail Showrooms & Executive Corporate Suites\n` +
-          `• **Carpet Area**: 850 sq.ft. to 12,500 sq.ft.\n` +
-          `• **Pricing**: Starting ₹82 Lakhs (Base rate: ₹6,250 / sq.ft.)\n` +
-          `• **Specifications**: Central HVAC, double-height grand lobby, and 10 high-speed elevators.\n\n` +
-          `Would you like a customized commercial ROI projection sheet?`;
-        sourceCitation = 'Capital Square Commercial Specifications';
-      } else if (textLower.includes('visit') || textLower.includes('book') || textLower.includes('tour') || textLower.includes('appointment') || textLower.includes('schedule') || textLower.includes('call') || textLower.includes('team')) {
-        showLeadForm = true;
-        replyText = `We would be delighted to arrange a site visit or consultation for you with our senior property advisory team. Please provide your contact details below to confirm your slot!`;
-      } else if (textLower.includes('brochure') || textLower.includes('pdf') || textLower.includes('download') || textLower.includes('floor plan')) {
-        replyText = `Here are the instant download links for project brochures and floor plans:\n\n` +
-          `📄 [Download The Sovereign Sky Villas Brochure (PDF)](#download)\n` +
-          `📄 [Download GIFT Horizon Towers Master Plan (PDF)](#download)\n` +
-          `📄 [Download Emerald Heights Floor Specs (PDF)](#download)\n\n` +
-          `All documents include detailed carpet areas, RERA certifications, and payment schedules.`;
-        sourceCitation = 'Prycoons FAQ Guide';
-      } else if (textLower.includes('price') || textLower.includes('cost') || textLower.includes('budget') || textLower.includes('rate')) {
-        replyText = `Prycoons offers residential and commercial developments across several price segments in Ahmedabad & GIFT City:\n\n` +
-          `1. **2 BHK Smart Residences** (GIFT City): ₹95 Lakhs – ₹1.25 Cr\n` +
-          `2. **3 BHK Premium Living** (Science City Road): ₹1.35 Cr – ₹1.85 Cr\n` +
-          `3. **4 & 5 BHK Sky Villas** (Bodakdev): ₹4.85 Cr – ₹8.50 Cr\n` +
-          `4. **Commercial Offices** (SG Highway): ₹82 Lakhs – ₹9.2 Cr\n\n` +
-          `Which budget range or location matches your requirements best?`;
-      } else if (textLower.includes('explore') || textLower.includes('project') || textLower.includes('suitable')) {
-        replyText = `We have 4 flagship projects available across residential and commercial sectors in Ahmedabad and GIFT City:\n\n` +
-          `• **The Sovereign Sky Villas** (Bodakdev) — Ultra-luxury 4 & 5 BHK Sky Mansions\n` +
-          `• **GIFT Horizon Towers** (GIFT City) — Smart tech 2 & 3 BHK high-rises\n` +
-          `• **Emerald Heights** (Science City Road) — Modern 3 BHK family residences\n` +
-          `• **Capital Square** (SG Highway) — Grade-A retail & commercial suites\n\n` +
-          `Which property would you like to explore in detail?`;
-      } else {
-        replyText = `Thank you for reaching out! We provide curated residential 2, 3, 4 & 5 BHK homes and Grade-A commercial spaces across Ahmedabad and GIFT City.\n\n` +
-          `You can ask me about:\n` +
-          `• Specific projects (**The Sovereign**, **GIFT Horizon**, **Emerald Heights**, **Capital Square**)\n` +
-          `• Floor plans, carpet areas, and RERA approvals\n` +
-          `• Pricing, payment plans, and home loan assistance\n` +
-          `• Scheduling a weekend site visit`;
-        sourceCitation = 'Prycoons Knowledge Base';
-      }
-    } 
-    // Education Responses
-    else if (bot.industryId === 'education') {
-      if (textLower.includes('eligibility') || textLower.includes('admission') || textLower.includes('requirement')) {
-        replyText = `For undergraduate programs at EduNova, applicants require a minimum of 60% aggregate in secondary schooling plus entrance evaluation. Early decision deadline is November 15.`;
-      } else if (textLower.includes('scholarship') || textLower.includes('fee')) {
-        replyText = `EduNova provides merit waivers for top percentile applicants. Flexible semester installments and financial counseling are available.`;
-      } else {
-        replyText = `At EduNova, we offer undergraduate and graduate degrees across Technology, Business, and Design. How can we help guide your academic journey today?`;
-      }
-      sourceCitation = 'EduNova Admissions Guide';
-    } 
-    // Healthcare Responses
-    else if (bot.industryId === 'healthcare') {
-      if (textLower.includes('doctor') || textLower.includes('appointment') || textLower.includes('book')) {
-        showLeadForm = true;
-        replyText = `Our specialist outpatient clinics operate Monday through Saturday from 8:00 AM to 8:00 PM. Please enter your contact details to secure your consultation appointment.`;
-      } else {
-        replyText = `CarePoint Clinics provides advanced care across Cardiology, Orthopedics, Neurology, and Pediatrics. For medical emergencies, please call our 24/7 hotline directly.`;
-      }
-      sourceCitation = 'CarePoint Hospital Directory';
-    }
-    // General fallback
-    else {
-      replyText = `Thank you for your question. Based on the knowledge base for **${bot.name}**, I am pleased to assist you with details, pricing, and bookings.\n\n` +
-        `Feel free to ask more specific questions or request our team to connect with you!`;
-      sourceCitation = `${bot.name} Knowledge Base`;
+    // Auto-capture lead if contact info extracted
+    if (response.extractedLead && !session.leadCapturedInCRM) {
+      session.leadCapturedInCRM = true;
+      submitLead(bot.id, response.extractedLead);
     }
 
-    return {
-      id: 'm-' + Date.now(),
-      sender: 'bot',
-      text: replyText,
-      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      propertyCard,
-      sourceCitation,
-      showLeadForm
-    };
+    return { response, session: updatedSession };
   };
 
   const submitLead = (botId, leadInfo) => {
@@ -465,6 +362,8 @@ export const PlatformProvider = ({ children }) => {
         syncKnowledgeSource,
         conversations,
         sendChatMessage,
+        createInitialSession,
+        getInactivityFollowUp,
         submitLead,
         analytics: MOCK_ANALYTICS,
         toasts,

@@ -2,6 +2,7 @@
 
 export const INDUSTRIES = [
   { id: 'real-estate', name: 'Real Estate & Property', icon: 'Building2', badgeClass: 'badge-primary', color: '#C85C4A', desc: 'Property discovery, BHK queries, site visits, brochure distribution, project guidance' },
+  { id: 'marketing', name: 'Marketing & Creative Agency', icon: 'Sparkles', badgeClass: 'badge-cyan', color: '#2A7E8C', desc: 'Brand identity, website UX, social growth, creative campaigns, client intake' },
   { id: 'education', name: 'Education & Admissions', icon: 'GraduationCap', badgeClass: 'badge-purple', color: '#7C5CB8', desc: 'Admissions, course discovery, fee structures, eligibility, campus inquiries' },
   { id: 'healthcare', name: 'Healthcare & Clinics', icon: 'HeartPulse', badgeClass: 'badge-danger', color: '#C85C4A', desc: 'Doctor appointment booking, clinic timings, department routing' },
   { id: 'hospitality', name: 'Hospitality & Stays', icon: 'Hotel', badgeClass: 'badge-gold', color: '#C99A52', desc: 'Room reservations, concierge, amenities, dining bookings' },
@@ -79,20 +80,20 @@ export const INITIAL_BOTS = [
     avatar: '🏢',
     industryId: 'real-estate',
     industryName: 'Real Estate & Property',
-    description: 'Conversational assistant for Prycoons Real Estate. Guides visitors through luxury apartments, BHK configurations, project pricing, brochures, and visit bookings.',
+    description: 'Conversational assistant for Prycoons Real Estate. Naturally guides visitors through luxury apartments, BHK configurations, project pricing, brochures, and visit bookings.',
     status: 'active',
     model: 'BRIM Conversational Model',
-    tone: 'Professional & Consultative',
-    welcomeMessage: 'Hello 👋 Welcome to Prycoons Real Estate! How can we help you today? Explore luxury 2/3/4 BHK residences, commercial spaces on SG Highway, or investment opportunities in GIFT City.',
-    promptGuidelines: 'Represent Prycoons Real Estate clearly and warmly. Provide accurate BHK sizes, pricing ranges, amenities, and RERA details. Help visitors schedule a site visit or download project brochures.',
+    tone: 'Warm, Consultative & Friendly',
+    welcomeMessage: 'Hi there 👋 Good day! Welcome to Prycoons Real Estate. How is your day going so far? May I know your name?',
+    promptGuidelines: 'Represent Prycoons Real Estate with human warmth and consultative expertise. Ask one natural question at a time. Mix personal lifestyle questions with property criteria, summarize matches, offer WhatsApp shortlist delivery, and connect to advisors.',
     leadCaptureEnabled: true,
     leadCaptureFields: ['name', 'phone', 'email', 'preferredBhk', 'budget'],
     primaryColor: '#C85C4A',
     suggestedQuestions: [
-      'Explore properties',
-      'Find a suitable project',
-      'Ask about pricing',
-      'Talk to our team'
+      'Looking to Buy 🏡',
+      'Thinking of Renting 🔑',
+      'Just Browsing ✨',
+      'Explore properties'
     ],
     sourcesCount: 5,
     totalConversations: 342,
@@ -101,6 +102,35 @@ export const INITIAL_BOTS = [
     avgResponseTime: '0.8s',
     createdAt: '2026-08-10',
     lastActive: '5 minutes ago'
+  },
+  {
+    id: 'apex-brand-ai',
+    name: 'Apex Creative & Branding Assistant',
+    avatar: '⚡',
+    industryId: 'marketing',
+    industryName: 'Marketing & Creative Agency',
+    description: 'Brand identity, UI/UX design, performance social marketing, and client intake assistant with location-aware trend conversations.',
+    status: 'active',
+    model: 'BRIM Conversational Model',
+    tone: 'Creative, Friendly & Consultative',
+    welcomeMessage: 'Hi there 👋 Good day! Welcome to Apex Brand Studio. I’m Maya. May I know your name?',
+    promptGuidelines: 'Understand client brand stories, discover their creative & marketing requirements, mix light aesthetic questions with strategic goals, share portfolio one-liners, and capture leads.',
+    leadCaptureEnabled: true,
+    leadCaptureFields: ['name', 'phone', 'email', 'serviceNeeded', 'budget'],
+    primaryColor: '#2A7E8C',
+    suggestedQuestions: [
+      'Eco-friendly startup 🌱',
+      'Brand identity & logo 🎨',
+      'Website & UX design 💻',
+      'Social media growth 📈'
+    ],
+    sourcesCount: 4,
+    totalConversations: 215,
+    leadCount: 22,
+    csat: 4.92,
+    avgResponseTime: '0.7s',
+    createdAt: '2026-08-15',
+    lastActive: 'Just now'
   },
   {
     id: 'edunova-ai',
@@ -118,9 +148,10 @@ export const INITIAL_BOTS = [
     leadCaptureFields: ['name', 'phone', 'email', 'programInterest'],
     primaryColor: '#7C5CB8',
     suggestedQuestions: [
-      'What are the eligibility criteria for B.Tech?',
-      'Tell me about merit scholarships',
-      'Application deadlines for Fall 2026'
+      'Undergraduate B.Tech / BBA',
+      'Postgraduate MBA / M.Tech',
+      'Merit scholarship eligibility',
+      'Fall 2026 application deadlines'
     ],
     sourcesCount: 4,
     totalConversations: 186,
@@ -140,7 +171,7 @@ export const INITIAL_BOTS = [
     status: 'active',
     model: 'BRIM Conversational Model',
     tone: 'Empathetic & Clear',
-    welcomeMessage: 'Hello, welcome to CarePoint Clinics. 🩺 How may we assist you with appointments or clinic timings?',
+    welcomeMessage: 'Hello, welcome to CarePoint Clinics. 🩺 How may we assist you with appointments or clinic timings today?',
     promptGuidelines: 'Help patients find the right specialty, check OPD timings, and schedule consultations.',
     leadCaptureEnabled: true,
     leadCaptureFields: ['name', 'phone', 'email', 'department', 'preferredDate'],
@@ -248,6 +279,18 @@ export const INITIAL_KNOWLEDGE_SOURCES = [
     status: 'synced',
     lastSync: '2 days ago',
     extractedSummary: 'Answers for home loan tie-ups with HDFC/SBI, site visit procedures, stamp duty schedules, and possession handover guidelines.'
+  },
+  {
+    id: 'src-6',
+    botId: 'apex-brand-ai',
+    title: 'Apex Agency 2026 Creative Portfolio & Rate Deck',
+    type: 'pdf',
+    size: '5.6 MB',
+    url: 'https://apexbrand.studio/docs/portfolio-2026.pdf',
+    chunks: 38,
+    status: 'synced',
+    lastSync: 'Just now',
+    extractedSummary: 'Case studies for D2C brands, tech startups, brand identity systems, high-converting Figma UI/UX designs, and social growth sprint packages.'
   }
 ];
 
@@ -259,58 +302,162 @@ export const INITIAL_CONVERSATIONS = [
     userName: 'Vikram Patel',
     userEmail: 'vikram.p@apexcapital.in',
     userPhone: '+91 98250 14890',
-    leadStatus: 'Site Visit Requested',
+    leadStatus: 'Shortlist Sent & Advisor Assigned',
     leadInterest: '3 BHK Science City Road (Emerald Heights)',
-    budget: '₹1.50 Cr - ₹1.80 Cr',
+    budget: '₹1.35 Cr - ₹1.85 Cr',
     channel: 'Website Widget',
     timestamp: 'Today, 14:22',
     duration: '3m 45s',
-    messagesCount: 6,
+    messagesCount: 12,
     sentiment: 'Positive',
     status: 'active',
     transcript: [
       {
         id: 'm1',
-        sender: 'user',
-        text: 'Hi, I am looking for a 3 BHK luxury flat near Science City with possession in 2027.',
+        sender: 'bot',
+        text: 'Hi there 👋 Good afternoon! Welcome to Prycoons Real Estate.\n\nIt’s a sunny afternoon here in Ahmedabad ☀️. Hope you’re staying cool and having a productive day! May I know your name?',
         time: '14:22'
       },
       {
         id: 'm2',
-        sender: 'bot',
-        text: 'Welcome! For 3 BHK residences on Science City Road, we feature **Prycoons Emerald Heights**.\n\n• **Configuration**: 3 BHK Luxury Living\n• **Carpet Area**: 1,950 – 2,400 sq.ft.\n• **Price**: ₹1.35 Cr to ₹1.85 Cr\n• **Possession**: March 2027 (RERA: `PR/GJ/AHMEDABAD/DASKROI/AUDA/RAA11045/050823`)\n• **Highlights**: 30,000 sq.ft. clubhouse, squash courts, and zen garden.\n\nWould you like to schedule an on-site visit or download the floor plan brochure?',
-        time: '14:22',
-        propertyCard: PRYCOONS_PROJECTS[2]
+        sender: 'user',
+        text: 'Hi, I am Vikram Patel.',
+        time: '14:22'
       },
       {
         id: 'm3',
-        sender: 'user',
-        text: 'Yes, please schedule a visit for Saturday morning around 11 AM.',
-        time: '14:24'
+        sender: 'bot',
+        text: 'Nice to meet you, Vikram! 👋\n\nSo tell me — are you looking to buy a new home, thinking about renting, or just casually browsing what’s out there?',
+        time: '14:23'
       },
       {
         id: 'm4',
-        sender: 'bot',
-        text: 'I would be happy to arrange your visit! Please share your contact number to confirm the appointment.',
-        time: '14:24'
+        sender: 'user',
+        text: 'Looking to buy a 3BHK for my family.',
+        time: '14:23'
       },
       {
         id: 'm5',
-        sender: 'user',
-        text: 'My name is Vikram Patel, phone is +91 98250 14890.',
-        time: '14:25'
+        sender: 'bot',
+        text: 'Exciting! Buying a home is a wonderful milestone 🏡.\n\nBefore we dive into locations, quick one 😄 — do you prefer Netflix nights in a cozy lounge 🍿 or morning walks on a wide open balcony 🌅?',
+        time: '14:23'
       },
       {
         id: 'm6',
+        sender: 'user',
+        text: 'Morning walks and open balcony 🌅',
+        time: '14:24'
+      },
+      {
+        id: 'm7',
         sender: 'bot',
-        text: 'Your site visit for Emerald Heights on Saturday at 11:00 AM is confirmed! Our property advisor will call you with location details.',
+        text: 'Love that 🌅! A home with a wide breezy balcony and lush gardens nearby will give you that peaceful start every day.\n\nWhich area in town are you leaning towards — somewhere like Ambli, SG Highway, Science City Road, or Bodakdev?',
+        time: '14:24'
+      },
+      {
+        id: 'm8',
+        sender: 'user',
+        text: 'Science City Road near Sola.',
+        time: '14:24'
+      },
+      {
+        id: 'm9',
+        sender: 'bot',
+        text: 'Got it 👍 A 3 BHK in Science City / Sola with an open balcony.\n\nHere is our prime match that fits your lifestyle:\n\n✨ **Prycoons Emerald Heights** — Refined 3 BHK Living for Modern Families\n• **Configuration**: 3 BHK (1,950 – 2,400 sq.ft.)\n• **Price Guide**: ₹1.35 Cr to ₹1.85 Cr\n• **Highlights**: 30,000 sq.ft. Clubhouse, Landscaped Zen Garden, Squash Courts\n\nWould you like me to share the complete shortlist & floor plan brochure on WhatsApp or Email?',
         time: '14:25',
+        propertyCard: PRYCOONS_PROJECTS[2]
+      },
+      {
+        id: 'm10',
+        sender: 'user',
+        text: 'Send on WhatsApp please. My number is +91 98250 14890, email is vikram.p@apexcapital.in',
+        time: '14:25'
+      },
+      {
+        id: 'm11',
+        sender: 'bot',
+        text: 'Thanks Vikram 🙌 I’ve saved your preferences!\n\nI’m sending your curated brochure packet to **+91 98250 14890**.\n\nWould you like me to connect you with one of our senior property advisors for a quick 5-minute call or schedule a private site tour?',
+        time: '14:26',
         leadCaptured: true
+      },
+      {
+        id: 'm12',
+        sender: 'user',
+        text: 'Yes please, arrange a call with an advisor for Saturday morning.',
+        time: '14:26'
       }
     ]
   },
   {
     id: 'conv-102',
+    botId: 'apex-brand-ai',
+    botName: 'Apex Creative & Branding Assistant',
+    userName: 'Rahul Sharma',
+    userEmail: 'rahul@greentech.in',
+    userPhone: '+91 98980 34567',
+    leadStatus: 'Portfolio Shared',
+    leadInterest: 'Brand Identity & Website Design',
+    budget: '₹2.5 Lakhs - ₹5.0 Lakhs',
+    channel: 'Website Widget',
+    timestamp: 'Today, 11:15',
+    duration: '2m 50s',
+    messagesCount: 8,
+    sentiment: 'Positive',
+    status: 'resolved',
+    transcript: [
+      {
+        id: 'm1',
+        sender: 'bot',
+        text: 'Hi there 👋 Good morning! Welcome to Apex Brand Studio.\n\nIt’s a bright sunny morning in Ahmedabad ☀️. Have you had your morning coffee yet? I’m Maya. May I know your name?',
+        time: '11:15'
+      },
+      {
+        id: 'm2',
+        sender: 'user',
+        text: 'Rahul',
+        time: '11:15'
+      },
+      {
+        id: 'm3',
+        sender: 'bot',
+        text: 'Hi Rahul 👋 Nice to meet you! Welcome to Apex Brand Studio! I’m here to help you make your brand stand out. What’s your brand’s story or what are you building?',
+        time: '11:16'
+      },
+      {
+        id: 'm4',
+        sender: 'user',
+        text: 'We are a startup focusing on eco-friendly packaging solutions.',
+        time: '11:16'
+      },
+      {
+        id: 'm5',
+        sender: 'bot',
+        text: 'That’s interesting! 🌱 Are you mainly looking for help with branding, social media, website design, or something else?',
+        time: '11:17'
+      },
+      {
+        id: 'm6',
+        sender: 'user',
+        text: 'We need full brand identity and a modern website.',
+        time: '11:17'
+      },
+      {
+        id: 'm7',
+        sender: 'bot',
+        text: 'Brand Identity & Web Design is our sweet spot! 🎨 We craft everything from logo systems to responsive web experiences.\n\nShould I send our complete agency portfolio and startup rate deck to your WhatsApp or Email?',
+        time: '11:18'
+      },
+      {
+        id: 'm8',
+        sender: 'user',
+        text: 'WhatsApp to +91 98980 34567, email rahul@greentech.in',
+        time: '11:18',
+        leadCaptured: true
+      }
+    ]
+  },
+  {
+    id: 'conv-103',
     botId: 'prycoons-ai',
     botName: 'BRIM Real Estate Assistant',
     userName: 'Rajesh & Suman Gupta',
@@ -350,56 +497,6 @@ export const INITIAL_CONVERSATIONS = [
         sender: 'bot',
         text: 'Here is your direct brochure link: [Download GIFT Horizon Towers Master Plan (PDF)](#download). Our NRI investment desk is available if you would like an ROI calculation.',
         time: '11:06'
-      }
-    ]
-  },
-  {
-    id: 'conv-103',
-    botId: 'prycoons-ai',
-    botName: 'BRIM Real Estate Assistant',
-    userName: 'Mehul Shah',
-    userEmail: 'mehul.shah@zydusgroup.com',
-    userPhone: '+91 99099 22334',
-    leadStatus: 'VIP Tour Requested',
-    leadInterest: 'The Sovereign Sky Villas (5 BHK Duplex)',
-    budget: '₹7.0 Cr - ₹9.0 Cr',
-    channel: 'Website Widget',
-    timestamp: 'Yesterday, 18:40',
-    duration: '5m 10s',
-    messagesCount: 5,
-    sentiment: 'Positive',
-    status: 'resolved',
-    transcript: [
-      {
-        id: 'm1',
-        sender: 'user',
-        text: 'Tell me about the largest sky villa available on SG Highway.',
-        time: '18:40'
-      },
-      {
-        id: 'm2',
-        sender: 'bot',
-        text: 'For unmatched luxury and privacy, we present **The Sovereign Sky Villas** in Bodakdev, just off SG Highway. These 5 BHK duplex sky mansions offer **6,800 sq.ft. carpet area** with private heated plunge pools and 14-ft high ceilings.',
-        time: '18:40',
-        propertyCard: PRYCOONS_PROJECTS[0]
-      },
-      {
-        id: 'm3',
-        sender: 'user',
-        text: 'What are the parking arrangements?',
-        time: '18:42'
-      },
-      {
-        id: 'm4',
-        sender: 'bot',
-        text: 'Each 5 BHK villa includes **4 dedicated basement parking slots with EV charging stations**, plus a private dedicated access elevator.\n\nThe Sovereign is an exclusive community of only 38 luxury residences.',
-        time: '18:42'
-      },
-      {
-        id: 'm5',
-        sender: 'user',
-        text: 'Excellent. Have your private client director call me tomorrow.',
-        time: '18:43'
       }
     ]
   }

@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { usePlatform } from '../../context/PlatformContext';
 import { PRYCOONS_PROJECTS } from '../../data/mockData';
+import { createInitialSession, getInactivityFollowUp } from '../../utils/conversationEngine';
 
 export const PublicChatPreview = () => {
   const { botId } = useParams();
@@ -25,15 +26,19 @@ export const PublicChatPreview = () => {
   const currentBot = bots.find((b) => b.id === botId) || bots[0];
   const messagesEndRef = useRef(null);
 
+  // Conversational session ref & state
+  const sessionRef = useRef(null);
+  const inactivityTimerRef = useRef(null);
+
+  // Initialize or reset session
+  if (!sessionRef.current || sessionRef.current.botId !== currentBot?.id) {
+    const freshSession = createInitialSession(currentBot);
+    freshSession.botId = currentBot?.id;
+    sessionRef.current = freshSession;
+  }
+
   // Chat conversation state
-  const [messages, setMessages] = useState([
-    {
-      id: 'welcome-1',
-      sender: 'bot',
-      text: currentBot?.welcomeMessage || 'Hello 👋 How can we help you today? Ask about 2/3/4 BHK luxury residences, commercial spaces on SG Highway, or high-yield investment properties in GIFT City.',
-      time: 'Just now'
-    }
-  ]);
+  const [messages, setMessages] = useState(() => [sessionRef.current.initialMessage]);
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
 
@@ -44,7 +49,7 @@ export const PublicChatPreview = () => {
     phone: '',
     email: '',
     preferredBhk: '3 BHK Luxury',
-    budget: '₹1.50 Cr - ₹2.00 Cr',
+    budget: '₹1.35 Cr - ₹1.85 Cr',
     preferredDate: 'Saturday 11:00 AM'
   });
 
@@ -56,9 +61,36 @@ export const PublicChatPreview = () => {
     scrollToBottom();
   }, [messages, isTyping]);
 
+  // Handle No-Response Inactivity Follow-up (Requirement #17)
+  useEffect(() => {
+    if (inactivityTimerRef.current) {
+      clearTimeout(inactivityTimerRef.current);
+    }
+
+    const lastMsg = messages[messages.length - 1];
+    if (lastMsg && lastMsg.sender === 'bot' && sessionRef.current && !sessionRef.current.inactivityFollowUpSent) {
+      inactivityTimerRef.current = setTimeout(() => {
+        const followUp = getInactivityFollowUp(sessionRef.current);
+        if (followUp) {
+          setMessages((prev) => [...prev, followUp]);
+        }
+      }, 18000);
+    }
+
+    return () => {
+      if (inactivityTimerRef.current) {
+        clearTimeout(inactivityTimerRef.current);
+      }
+    };
+  }, [messages]);
+
   const handleSendMessage = (textToSend) => {
     const query = textToSend || input;
     if (!query.trim()) return;
+
+    if (inactivityTimerRef.current) {
+      clearTimeout(inactivityTimerRef.current);
+    }
 
     const userMessage = {
       id: 'usr-' + Date.now(),
@@ -72,14 +104,25 @@ export const PublicChatPreview = () => {
     setIsTyping(true);
 
     setTimeout(() => {
-      const response = sendChatMessage(currentBot.id, query, messages);
+      const { response, session: updatedSession } = sendChatMessage(
+        currentBot.id, 
+        query, 
+        messages, 
+        sessionRef.current
+      );
+      
+      sessionRef.current = updatedSession;
       setMessages((prev) => [...prev, response]);
       setIsTyping(false);
 
       if (response.showLeadForm) {
         setActiveLeadForm(true);
       }
-    }, 500);
+
+      if (response.advisorConnected) {
+        addToast('Advisor consultation requested!', 'success');
+      }
+    }, 450);
   };
 
   const handleFormSubmit = (e) => {
@@ -111,14 +154,13 @@ export const PublicChatPreview = () => {
   };
 
   const handleRestartChat = () => {
-    setMessages([
-      {
-        id: 'welcome-reset',
-        sender: 'bot',
-        text: currentBot?.welcomeMessage || 'Hello 👋 How can we help you today?',
-        time: 'Just now'
-      }
-    ]);
+    if (inactivityTimerRef.current) {
+      clearTimeout(inactivityTimerRef.current);
+    }
+    const freshSession = createInitialSession(currentBot);
+    freshSession.botId = currentBot?.id;
+    sessionRef.current = freshSession;
+    setMessages([freshSession.initialMessage]);
     setActiveLeadForm(false);
     addToast('Conversation restarted', 'info');
   };
@@ -126,6 +168,12 @@ export const PublicChatPreview = () => {
   const handleBrochureDownload = (projectName) => {
     addToast(`Downloading ${projectName} Specifications (PDF)...`, 'success');
   };
+
+  // Get current active quick replies from the latest bot message
+  const lastBotMessage = [...messages].reverse().find((m) => m.sender === 'bot');
+  const activeQuickReplies = (lastBotMessage?.quickReplies && lastBotMessage.quickReplies.length > 0)
+    ? lastBotMessage.quickReplies
+    : (currentBot?.suggestedQuestions || ['Looking to Buy 🏡', 'Thinking of Renting 🔑', 'Just Browsing ✨']);
 
   return (
     <div 
@@ -163,7 +211,7 @@ export const PublicChatPreview = () => {
             </div>
             <div className="chat-title-group">
               <div className="chat-title">{currentBot?.name || 'BRIM Assistant'}</div>
-              <div className="chat-subtitle">Prycoons Real Estate • Online</div>
+              <div className="chat-subtitle">{currentBot?.industryName || 'Prycoons Real Estate'} • Online</div>
             </div>
           </div>
 
@@ -225,6 +273,13 @@ export const PublicChatPreview = () => {
                         </button>
                       </div>
                     </div>
+                  </div>
+                )}
+
+                {msg.sourceCitation && (
+                  <div className="source-citation">
+                    <Sparkles size={11} style={{ color: 'var(--primary)' }} />
+                    <span>{msg.sourceCitation}</span>
                   </div>
                 )}
 
@@ -311,12 +366,7 @@ export const PublicChatPreview = () => {
 
         {/* Suggestion Pills Bar */}
         <div className="suggestion-pills-bar">
-          {(currentBot?.suggestedQuestions || [
-            'Explore properties',
-            'Find a suitable project',
-            'Ask about pricing',
-            'Talk to our team'
-          ]).map((q, idx) => (
+          {activeQuickReplies.map((q, idx) => (
             <button
               key={idx}
               type="button"
