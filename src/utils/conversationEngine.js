@@ -232,6 +232,75 @@ const extractEmail = (text) => {
 };
 
 /**
+ * Location Extractor — recognises known Ahmedabad areas plus free-text "in X", "around X", "near X"
+ */
+const KNOWN_LOCATIONS = [
+  { keys: ['ambli'], label: 'Ambli / SG Highway' },
+  { keys: ['sg highway', 'sg road'], label: 'Ambli / SG Highway' },
+  { keys: ['bodakdev'], label: 'Bodakdev' },
+  { keys: ['gift city', 'gift'], label: 'GIFT City' },
+  { keys: ['science city', 'sola'], label: 'Science City / Sola' },
+  { keys: ['satellite'], label: 'Satellite' },
+  { keys: ['prahlad nagar', 'prahladnagar'], label: 'Prahlad Nagar' },
+  { keys: ['vastrapur'], label: 'Vastrapur' },
+  { keys: ['navrangpura'], label: 'Navrangpura' },
+  { keys: ['gota'], label: 'Gota' },
+  { keys: ['chandkheda'], label: 'Chandkheda' },
+  { keys: ['thaltej'], label: 'Thaltej' },
+  { keys: ['south bopal', 'bopal'], label: 'South Bopal / Bopal' },
+  { keys: ['shela'], label: 'Shela' },
+  { keys: ['makarba'], label: 'Makarba' },
+  { keys: ['motera'], label: 'Motera' },
+  { keys: ['nikol'], label: 'Nikol' },
+  { keys: ['vastral'], label: 'Vastral' },
+];
+
+const extractLocation = (text) => {
+  const tl = text.toLowerCase();
+  // Check known locations first
+  for (const loc of KNOWN_LOCATIONS) {
+    for (const key of loc.keys) {
+      if (tl.includes(key)) return loc.label;
+    }
+  }
+  // Try generic patterns: "in X", "around X", "near X", "at X"
+  const genericMatch = tl.match(/(?:in|around|near|at)\s+([a-z][a-z\s]{2,20})(?:[,.]|$)/);
+  if (genericMatch) {
+    const candidate = genericMatch[1].trim();
+    const stopWords = ['ahmedabad', 'gujarat', 'india', 'mind', 'my', 'the', 'a', 'an'];
+    if (!stopWords.includes(candidate)) {
+      return candidate.charAt(0).toUpperCase() + candidate.slice(1);
+    }
+  }
+  return '';
+};
+
+/**
+ * Home Type Extractor — recognises BHK variants and bedroom counts
+ */
+const extractHomeType = (text) => {
+  const tl = text.toLowerCase();
+  if (/5\s*bhk|5\s*bed|five\s*bed|five\s*bhk/.test(tl)) return '4 & 5 BHK Palatial Sky Villa';
+  if (/4\s*bhk|4\s*bed|four\s*bed|four\s*bhk/.test(tl)) return '4 & 5 BHK Palatial Sky Villa';
+  if (/3\s*bhk|3\s*bed|three\s*bed|three\s*bhk/.test(tl)) return '3 BHK Luxury Living';
+  if (/2\s*bhk|2\s*bed|two\s*bed|two\s*bhk/.test(tl)) return '2 BHK Smart Residence';
+  if (/villa|mansion|penthouse|sky\s*villa/.test(tl)) return '4 & 5 BHK Palatial Sky Villa';
+  return '';
+};
+
+/**
+ * Build a compact summary of what is already known from the session,
+ * used to craft context-aware replies and skip already-answered questions.
+ */
+const buildKnownContext = (session) => {
+  const parts = [];
+  if (session.discovery.homeType) parts.push(session.discovery.homeType);
+  if (session.discovery.location) parts.push(`in ${session.discovery.location}`);
+  if (session.discovery.mustHave) parts.push(`with ${session.discovery.mustHave.toLowerCase()}`);
+  return parts.join(', ');
+};
+
+/**
  * Main Process Message function
  * Transitions conversation states naturally
  */
@@ -254,22 +323,39 @@ export const processUserMessage = (userText, session, bot) => {
   let leadCaptured = false;
   let advisorConnected = false;
 
-  // Extract any names, phone, email present in input
+  // ── Rich entity extraction on every message ──────────────────────────────
+  // Name
   const foundName = extractName(text);
   if (foundName && !session.userName) {
     session.userName = foundName;
     session.lead.name = foundName;
   }
-
+  // Phone
   const foundPhone = extractPhone(text);
   if (foundPhone && !session.lead.phone) {
     session.lead.phone = foundPhone;
   }
-
+  // Email
   const foundEmail = extractEmail(text);
   if (foundEmail && !session.lead.email) {
     session.lead.email = foundEmail;
   }
+  // Location — only store if not already known
+  const foundLocation = extractLocation(text);
+  if (foundLocation && !session.discovery.location) {
+    session.discovery.location = foundLocation;
+  }
+  // Home type — only store if not already known
+  const foundHomeType = extractHomeType(text);
+  if (foundHomeType && !session.discovery.homeType) {
+    session.discovery.homeType = foundHomeType;
+  }
+  // Intent signals — only store if not already known
+  if (!session.intent) {
+    if (/\brent\b|\brenting\b/.test(textLower)) session.intent = 'rent';
+    else if (/\bbuy\b|\bbuying\b|\bpurchase\b|\blooking for\b|\bwant\b|\bneed\b/.test(textLower)) session.intent = 'buy';
+  }
+  // ─────────────────────────────────────────────────────────────────────────
 
   // =========================================================================
   // 1. GREETING & NAME CAPTURE STAGE
@@ -315,14 +401,35 @@ export const processUserMessage = (userText, session, bot) => {
   else if (session.state === 'INTENT_DETECTION') {
     if (textLower.includes('rent')) {
       session.intent = 'rent';
-      replyText = `Got it! Renting gives you fantastic flexibility 👍.\n\nAre you looking for a cozy 2BHK, a spacious 3BHK, or something larger in Ahmedabad?`;
-      quickReplies = ['2 BHK furnished', '3 BHK luxury', '4 BHK Penthouse', 'Open to options'];
-      nextState = 'DISCOVERY_HOME_TYPE';
+      // If home type already known from this same message, skip straight to must-have
+      if (session.discovery.homeType && session.discovery.location) {
+        replyText = `Got it! Renting — a **${session.discovery.homeType}** in **${session.discovery.location}** 👍.\n\nWhat is the one must-have feature for your new home? 🌿`;
+        quickReplies = ['Big Balcony / Terrace 🌅', 'Spacious Chef Kitchen 🍳', 'Garden & Greenery 🌳', 'Clubhouse, Gym & Pool 🏊', 'High-speed EV Parking ⚡'];
+        nextState = 'DISCOVERY_MUST_HAVE';
+      } else if (session.discovery.homeType) {
+        replyText = `Got it! Renting a **${session.discovery.homeType}** 👍.\n\nWhich area in Ahmedabad are you considering?`;
+        quickReplies = ['Ambli & SG Highway', 'Science City / Sola', 'Bodakdev', 'GIFT City', 'Gota', 'Open to suggestions'];
+        nextState = 'DISCOVERY_LOCATION';
+      } else if (session.discovery.location) {
+        replyText = `Got it! Renting in **${session.discovery.location}** 👍.\n\nAre you looking for a 2BHK, 3BHK, or something larger?`;
+        quickReplies = ['2 BHK furnished', '3 BHK luxury', '4 BHK Penthouse', 'Open to options'];
+        nextState = 'DISCOVERY_HOME_TYPE';
+      } else {
+        replyText = `Got it! Renting gives you fantastic flexibility 👍.\n\nAre you looking for a cozy 2BHK, a spacious 3BHK, or something larger in Ahmedabad?`;
+        quickReplies = ['2 BHK furnished', '3 BHK luxury', '4 BHK Penthouse', 'Open to options'];
+        nextState = 'DISCOVERY_HOME_TYPE';
+      }
     } else if (textLower.includes('browse') || textLower.includes('explor') || textLower.includes('check')) {
       session.intent = 'browse';
-      replyText = `No problem at all 😊. Just exploring is a great place to start!\n\nIs there a particular neighborhood you've been curious about, like Ambli, SG Highway, Bodakdev, or GIFT City?`;
-      quickReplies = ['Ambli & SG Highway', 'Science City / Sola', 'Bodakdev Sky Mansions', 'GIFT City High-Rises', 'Suggest best areas'];
-      nextState = 'DISCOVERY_LOCATION';
+      if (session.discovery.location) {
+        replyText = `No problem at all 😊. Let's explore what's available in **${session.discovery.location}**!\n\nAre you open to any configuration or do you have a BHK preference?`;
+        quickReplies = ['2 BHK', '3 BHK', '4 BHK', 'Open to anything'];
+        nextState = 'DISCOVERY_HOME_TYPE';
+      } else {
+        replyText = `No problem at all 😊. Just exploring is a great place to start!\n\nIs there a particular neighborhood you've been curious about, like Ambli, SG Highway, Bodakdev, or GIFT City?`;
+        quickReplies = ['Ambli & SG Highway', 'Science City / Sola', 'Bodakdev Sky Mansions', 'GIFT City High-Rises', 'Suggest best areas'];
+        nextState = 'DISCOVERY_LOCATION';
+      }
     } else if (textLower.includes('commercial') || textLower.includes('office') || textLower.includes('retail')) {
       session.intent = 'commercial';
       session.discovery.homeType = 'Commercial Retail / Executive Suites';
@@ -330,10 +437,28 @@ export const processUserMessage = (userText, session, bot) => {
       quickReplies = ['Corporate Executive Office', 'High-street Retail Shop', 'High-Yield Investment Unit'];
       nextState = 'DISCOVERY_BUDGET';
     } else {
-      session.intent = 'buy';
-      replyText = `Exciting! Buying a home is a wonderful milestone 🏡.\n\nBefore we dive into locations, quick one 😄 — do you prefer **Netflix nights in a cozy lounge 🍿** or **morning walks on a wide open balcony 🌅**?`;
-      quickReplies = ['Netflix nights 🍿', 'Morning walks & balcony 🌅', 'Both are essential! ✨'];
-      nextState = 'DISCOVERY_PERSONAL';
+      // Buy intent (default)
+      if (!session.intent) session.intent = 'buy';
+      // Both location AND home type already captured from same message → skip personal, skip location, skip home type
+      if (session.discovery.homeType && session.discovery.location) {
+        replyText = `Nice! A **${session.discovery.homeType}** in **${session.discovery.location}** — got it 👍.\n\nWhat would you say is the most important feature for your new home? 🌿`;
+        quickReplies = ['Big Balcony / Terrace 🌅', 'Spacious Chef Kitchen 🍳', 'Garden & Greenery 🌳', 'Clubhouse, Gym & Pool 🏊', 'High-speed EV Parking ⚡'];
+        nextState = 'DISCOVERY_MUST_HAVE';
+      } else if (session.discovery.homeType) {
+        // Home type known, need location → skip personal, skip home type
+        replyText = `Great — a **${session.discovery.homeType}** 👍.\n\nWhich area in Ahmedabad are you considering?`;
+        quickReplies = ['Ambli', 'SG Highway', 'Bodakdev', 'Science City / Sola', 'GIFT City', 'Gota'];
+        nextState = 'DISCOVERY_LOCATION';
+      } else if (session.discovery.location) {
+        // Location known, need home type → skip personal, skip location
+        replyText = `Exciting! Buying in **${session.discovery.location}** — great choice 🏡.\n\nAre you thinking 2BHK, 3BHK, or something larger?`;
+        quickReplies = ['2 BHK Smart Unit', '3 BHK Luxury', '4 & 5 BHK Sky Villa', 'Open to options'];
+        nextState = 'DISCOVERY_HOME_TYPE';
+      } else {
+        replyText = `Exciting! Buying a home is a wonderful milestone 🏡.\n\nBefore we dive into locations, quick one 😄 — do you prefer **Netflix nights in a cozy lounge 🍿** or **morning walks on a wide open balcony 🌅**?`;
+        quickReplies = ['Netflix nights 🍿', 'Morning walks & balcony 🌅', 'Both are essential! ✨'];
+        nextState = 'DISCOVERY_PERSONAL';
+      }
     }
   }
 
@@ -343,56 +468,116 @@ export const processUserMessage = (userText, session, bot) => {
   else if (session.state === 'DISCOVERY_PERSONAL') {
     if (textLower.includes('netflix') || textLower.includes('popcorn') || textLower.includes('lounge')) {
       session.discovery.lifestyle = 'Netflix nights & cozy living lounge';
-      replyText = `Haha, Netflix nights are the best! 🍿 A spacious living room with great ambient light and acoustics makes all the difference.\n\nBy the way, which area in town are you considering — somewhere like Ambli, SG Highway, Bodakdev, or open to suggestions?`;
+      if (session.discovery.location) {
+        // Location already known — skip asking for it
+        if (session.discovery.homeType) {
+          replyText = `Haha, Netflix nights are the best! 🍿\n\nSo — a **${session.discovery.homeType}** in **${session.discovery.location}** with a great living space. What is the one must-have feature for you? 🌿`;
+          quickReplies = ['Big Balcony / Terrace 🌅', 'Spacious Chef Kitchen 🍳', 'Garden & Greenery 🌳', 'Clubhouse, Gym & Pool 🏊', 'High-speed EV Parking ⚡'];
+          nextState = 'DISCOVERY_MUST_HAVE';
+        } else {
+          replyText = `Haha, Netflix nights are the best! 🍿 A spacious living room makes all the difference.\n\nYou mentioned **${session.discovery.location}** — are you thinking 2BHK, 3BHK, or something bigger?`;
+          quickReplies = ['2 BHK Smart Unit', '3 BHK Luxury', '4 & 5 BHK Sky Villa'];
+          nextState = 'DISCOVERY_HOME_TYPE';
+        }
+      } else {
+        replyText = `Haha, Netflix nights are the best! 🍿 A spacious living room with great ambient light and acoustics makes all the difference.\n\nBy the way, which area in town are you considering — somewhere like Ambli, SG Highway, Bodakdev, or open to suggestions?`;
+        quickReplies = ['Ambli', 'SG Highway', 'Bodakdev', 'Science City / Sola', 'GIFT City', 'Open to suggestions'];
+        nextState = 'DISCOVERY_LOCATION';
+      }
     } else if (textLower.includes('morning') || textLower.includes('walk') || textLower.includes('balcony')) {
       session.discovery.lifestyle = 'Morning walks & open balcony';
-      session.discovery.mustHave = 'Spacious Balcony & Zen Garden';
-      replyText = `Love that 🌅! A home with a wide breezy balcony and lush gardens nearby will give you that peaceful start every day.\n\nWhich location are you leaning towards — Ambli, SG Highway, Science City, or GIFT City?`;
+      if (!session.discovery.mustHave) session.discovery.mustHave = 'Spacious Balcony & Zen Garden';
+      if (session.discovery.location) {
+        if (session.discovery.homeType) {
+          replyText = `Love that 🌅! A wide breezy balcony gives you the perfect peaceful start every day.\n\nSo — a **${session.discovery.homeType}** in **${session.discovery.location}** with a great balcony. What budget range are you comfortable with? 💰`;
+          quickReplies = ['₹90 Lakhs – ₹1.35 Cr', '₹1.35 Cr – ₹2.00 Cr', '₹4.50 Cr – ₹8.50 Cr', 'Flexible / Best value'];
+          nextState = 'DISCOVERY_BUDGET';
+        } else {
+          replyText = `Love that 🌅! A home with a wide breezy balcony will be perfect.\n\nYou mentioned **${session.discovery.location}** — are you thinking 2BHK, 3BHK, or something larger?`;
+          quickReplies = ['2 BHK Smart Unit', '3 BHK Luxury', '4 & 5 BHK Sky Villa'];
+          nextState = 'DISCOVERY_HOME_TYPE';
+        }
+      } else {
+        replyText = `Love that 🌅! A home with a wide breezy balcony and lush gardens nearby will give you that peaceful start every day.\n\nWhich location are you leaning towards — Ambli, SG Highway, Science City, or GIFT City?`;
+        quickReplies = ['Ambli', 'SG Highway', 'Bodakdev', 'Science City / Sola', 'GIFT City', 'Open to suggestions'];
+        nextState = 'DISCOVERY_LOCATION';
+      }
     } else {
       session.discovery.lifestyle = 'Balanced luxury lifestyle';
-      replyText = `Perfect balance! A home should be both an entertainment lounge and a serene personal sanctuary 🌿.\n\nDo you already have an area in mind, or should I suggest some top locations in Ahmedabad?`;
+      if (session.discovery.location) {
+        if (session.discovery.homeType) {
+          replyText = `Perfect balance! 🌿 So — a **${session.discovery.homeType}** in **${session.discovery.location}**. What is the one must-have feature for you?`;
+          quickReplies = ['Big Balcony / Terrace 🌅', 'Spacious Chef Kitchen 🍳', 'Garden & Greenery 🌳', 'Clubhouse, Gym & Pool 🏊', 'High-speed EV Parking ⚡'];
+          nextState = 'DISCOVERY_MUST_HAVE';
+        } else {
+          replyText = `Perfect balance! A home should be both a lounge and a sanctuary 🌿.\n\nYou mentioned **${session.discovery.location}** — are you thinking 2BHK, 3BHK, or something bigger?`;
+          quickReplies = ['2 BHK Smart Unit', '3 BHK Luxury', '4 & 5 BHK Sky Villa'];
+          nextState = 'DISCOVERY_HOME_TYPE';
+        }
+      } else {
+        replyText = `Perfect balance! A home should be both an entertainment lounge and a serene personal sanctuary 🌿.\n\nDo you already have an area in mind, or should I suggest some top locations in Ahmedabad?`;
+        quickReplies = ['Ambli', 'SG Highway', 'Bodakdev', 'Science City / Sola', 'GIFT City', 'Open to suggestions'];
+        nextState = 'DISCOVERY_LOCATION';
+      }
     }
-    quickReplies = ['Ambli', 'SG Highway', 'Bodakdev', 'Science City / Sola', 'GIFT City', 'Open to suggestions'];
-    nextState = 'DISCOVERY_LOCATION';
   }
 
   // =========================================================================
   // 4. DISCOVERY: LOCATION
   // =========================================================================
   else if (session.state === 'DISCOVERY_LOCATION') {
-    if (textLower.includes('ambli')) {
-      session.discovery.location = 'Ambli / SG Highway';
-      replyText = `Ambli is one of the most sought-after upscale corridors right now — great cafes, rapid connectivity, and premium communities 🏙️.\n\nAre you thinking about a cozy 2BHK, a 3BHK, or something larger like a 4 or 5 BHK sky villa?`;
-    } else if (textLower.includes('bodakdev')) {
-      session.discovery.location = 'Bodakdev';
-      replyText = `Bodakdev is classic luxury — established, quiet, and right near the city's finest spots.\n\nAre you looking for a generous 3BHK or a 4/5 BHK palatial sky villa?`;
-    } else if (textLower.includes('gift')) {
-      session.discovery.location = 'GIFT City';
-      replyText = `GIFT City SEZ is incredible for both modern lifestyle and smart investment yields (projected 6.8%–7.5%) 📈.\n\nAre you looking at 2 BHK smart homes or 3 BHK executive high-rises?`;
-    } else if (textLower.includes('science') || textLower.includes('sola')) {
-      session.discovery.location = 'Science City / Sola';
-      replyText = `Science City Road is fantastic for families — wide avenues, green spaces, and easy SG Highway access 🌳.\n\nAre you focusing on 3 BHK luxury residences or 4 BHK homes?`;
-    } else {
-      session.discovery.location = 'Ahmedabad Prime Corridors (Ambli / SG Highway)';
-      replyText = `Great! Ambli, Science City, and Bodakdev are our most popular premium corridors.\n\nAre you thinking about a 2BHK, a 3BHK, or something bigger like a 4 or 5 BHK?`;
+    // Location may have already been extracted above; if not, parse it now from known keywords
+    if (!session.discovery.location) {
+      if (textLower.includes('ambli')) session.discovery.location = 'Ambli / SG Highway';
+      else if (textLower.includes('sg highway') || textLower.includes('sg road')) session.discovery.location = 'Ambli / SG Highway';
+      else if (textLower.includes('bodakdev')) session.discovery.location = 'Bodakdev';
+      else if (textLower.includes('gift')) session.discovery.location = 'GIFT City';
+      else if (textLower.includes('science') || textLower.includes('sola')) session.discovery.location = 'Science City / Sola';
+      else session.discovery.location = 'Ahmedabad Prime Corridors (Ambli / SG Highway)';
     }
-    quickReplies = ['3 BHK Luxury', '2 BHK Smart Unit', '4 & 5 BHK Sky Villa', 'Commercial Office'];
-    nextState = 'DISCOVERY_HOME_TYPE';
+
+    const loc = session.discovery.location;
+
+    // If home type is already known, skip asking for it — go straight to must-have
+    if (session.discovery.homeType) {
+      replyText = `Got it — **${session.discovery.homeType}** in **${loc}** 👍.\n\nWhat is the one must-have feature your new home absolutely needs? 🌿`;
+      quickReplies = ['Big Balcony / Terrace 🌅', 'Spacious Chef Kitchen 🍳', 'Garden & Greenery 🌳', 'Clubhouse, Gym & Pool 🏊', 'High-speed EV Parking ⚡'];
+      nextState = 'DISCOVERY_MUST_HAVE';
+    } else {
+      // Need home type — give a location-aware reply then ask BHK
+      if (loc.includes('Ambli')) {
+        replyText = `Ambli is one of the most sought-after upscale corridors right now — great cafes, rapid connectivity, and premium communities 🏙️.\n\nAre you thinking about a cozy 2BHK, a 3BHK, or something larger like a 4 or 5 BHK sky villa?`;
+      } else if (loc.includes('Bodakdev')) {
+        replyText = `Bodakdev is classic luxury — established, quiet, and right near the city's finest spots.\n\nAre you looking for a generous 3BHK or a 4/5 BHK palatial sky villa?`;
+      } else if (loc.includes('GIFT')) {
+        replyText = `GIFT City SEZ is incredible for both modern lifestyle and smart investment yields (projected 6.8%–7.5%) 📈.\n\nAre you looking at 2 BHK smart homes or 3 BHK executive high-rises?`;
+      } else if (loc.includes('Science City') || loc.includes('Sola')) {
+        replyText = `Science City Road is fantastic for families — wide avenues, green spaces, and easy SG Highway access 🌳.\n\nAre you focusing on 3 BHK luxury residences or 4 BHK homes?`;
+      } else {
+        replyText = `**${loc}** — great choice! 👍\n\nAre you thinking about a 2BHK, a 3BHK, or something bigger like a 4 or 5 BHK?`;
+      }
+      quickReplies = ['3 BHK Luxury', '2 BHK Smart Unit', '4 & 5 BHK Sky Villa', 'Commercial Office'];
+      nextState = 'DISCOVERY_HOME_TYPE';
+    }
   }
 
   // =========================================================================
   // 5. DISCOVERY: HOME TYPE & MUST-HAVES
   // =========================================================================
   else if (session.state === 'DISCOVERY_HOME_TYPE') {
-    if (textLower.includes('2bhk') || textLower.includes('2 bhk')) {
-      session.discovery.homeType = '2 BHK Smart Residence';
-    } else if (textLower.includes('4') || textLower.includes('5') || textLower.includes('villa') || textLower.includes('mansion')) {
-      session.discovery.homeType = '4 & 5 BHK Palatial Sky Villa';
-    } else {
-      session.discovery.homeType = '3 BHK Luxury Living';
+    // Home type may already be extracted above; if not, parse from keywords
+    if (!session.discovery.homeType) {
+      if (textLower.includes('2bhk') || textLower.includes('2 bhk') || /two\s*bed/.test(textLower)) {
+        session.discovery.homeType = '2 BHK Smart Residence';
+      } else if (/4|5|four|five/.test(textLower) || textLower.includes('villa') || textLower.includes('mansion')) {
+        session.discovery.homeType = '4 & 5 BHK Palatial Sky Villa';
+      } else {
+        session.discovery.homeType = '3 BHK Luxury Living';
+      }
     }
 
-    replyText = `Got it 👍 ${session.discovery.homeType}.\n\nWhat is the one must-have feature your new home absolutely needs? 🌿`;
+    const knownCtx = buildKnownContext(session);
+    replyText = `Got it 👍 ${knownCtx ? `— **${knownCtx}**` : session.discovery.homeType}.\n\nWhat is the one must-have feature your new home absolutely needs? 🌿`;
     quickReplies = ['Big Balcony / Terrace 🌅', 'Spacious Chef Kitchen 🍳', 'Garden & Greenery 🌳', 'Clubhouse, Gym & Pool 🏊', 'High-speed EV Parking ⚡'];
     nextState = 'DISCOVERY_MUST_HAVE';
   }
@@ -401,18 +586,27 @@ export const processUserMessage = (userText, session, bot) => {
   // 6. DISCOVERY: MUST-HAVE & BUDGET / TIMELINE
   // =========================================================================
   else if (session.state === 'DISCOVERY_MUST_HAVE') {
+    // Also catch location/homeType if user slips them in here
     if (textLower.includes('balcony') || textLower.includes('terrace')) {
       session.discovery.mustHave = 'Wide Scenic Balcony';
-      replyText = `A scenic balcony is non-negotiable for evening chai and relaxing views ☕.\n\nWhat budget range are you comfortable with? I can narrow down the perfect options for you 💰.`;
     } else if (textLower.includes('kitchen')) {
       session.discovery.mustHave = 'Spacious Kitchen & Utility';
-      replyText = `A large, well-ventilated kitchen makes daily living so much more enjoyable 🍳.\n\nWhat budget bracket are you aiming around?`;
-    } else if (textLower.includes('garden') || textLower.includes('green')) {
+    } else if (textLower.includes('garden') || textLower.includes('green') || textLower.includes('park')) {
       session.discovery.mustHave = 'Landscaped Zen Gardens';
-      replyText = `Living close to nature brings so much peace 🌿.\n\nWhat budget range are you planning for this move?`;
-    } else {
+    } else if (!session.discovery.mustHave) {
       session.discovery.mustHave = text.length > 20 ? text.slice(0, 30) : text;
-      replyText = `Noted! That is an excellent requirement 👍.\n\nWhat budget range are you comfortable with?`;
+    }
+
+    const knownCtx = buildKnownContext(session);
+    const mustLabel = session.discovery.mustHave?.toLowerCase() || '';
+    if (mustLabel.includes('balcony') || mustLabel.includes('terrace')) {
+      replyText = `A scenic balcony is non-negotiable for evening chai and relaxing views ☕${knownCtx ? ` — perfect for a **${knownCtx}**` : ''}.\n\nWhat budget range are you comfortable with? 💰`;
+    } else if (mustLabel.includes('kitchen')) {
+      replyText = `A large, well-ventilated kitchen makes daily living so much more enjoyable 🍳${knownCtx ? ` — noted for **${knownCtx}**` : ''}.\n\nWhat budget bracket are you aiming around?`;
+    } else if (mustLabel.includes('garden') || mustLabel.includes('green') || mustLabel.includes('park')) {
+      replyText = `Living close to nature brings so much peace 🌿${knownCtx ? ` — a **${knownCtx}** near greenery sounds perfect` : ''}.\n\nWhat budget range are you planning for this move?`;
+    } else {
+      replyText = `Noted — ${session.discovery.mustHave} 👍${knownCtx ? `. So a **${knownCtx}**` : ''}.\n\nWhat budget range are you comfortable with?`;
     }
     quickReplies = ['₹90 Lakhs – ₹1.35 Cr', '₹1.35 Cr – ₹2.00 Cr', '₹4.50 Cr – ₹8.50 Cr', 'Flexible / Best value'];
     nextState = 'DISCOVERY_BUDGET';
