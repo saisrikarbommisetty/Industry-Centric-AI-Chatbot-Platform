@@ -136,16 +136,11 @@ export const createInitialSession = (bot = null) => {
   let initialText = '';
   let initialQuickReplies = [];
 
-  if (isRealEstate) {
-    initialText = `Hi there 👋 ${timeCtx.greeting} Welcome to Prycoons Real Estate!\n\n${timeCtx.subtext} May I know your name so I know who I am chatting with?`;
-    initialQuickReplies = ['Hi! I am Rahul', 'Hello!', 'Looking for homes', 'Just exploring'];
-  } else if (isMarketing) {
-    initialText = `Hi there 👋 ${timeCtx.greeting} Welcome to Apex Brand Studio!\n\n${timeCtx.subtext} I’m Maya. May I know your name?`;
-    initialQuickReplies = ['I am Rahul', 'Hi Maya!', 'Need branding help', 'Just looking around'];
-  } else {
-    initialText = `Hi there 👋 ${timeCtx.greeting} Welcome to ${botName}!\n\n${timeCtx.subtext} May I know your name?`;
-    initialQuickReplies = ['Hi!', 'Hello there', 'I have a question'];
-  }
+  // Minimal first message asking only for the user's name
+  const minimalGreeting = 'Hi 👋 May I know your name?';
+  initialText = minimalGreeting;
+  // Simple quick replies prompting name input
+  initialQuickReplies = ['I am Rahul', 'Hello', 'My name is Rahul'];
 
   return {
     state: 'GREETING',
