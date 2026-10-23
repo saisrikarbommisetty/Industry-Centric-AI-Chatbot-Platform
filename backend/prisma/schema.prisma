@@ -1,0 +1,214 @@
+// Prisma Schema for Industry-Centric AI Chatbot Platform
+// Supports PostgreSQL + pgvector for RAG and Vector Retrieval
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [vector]
+}
+
+enum Role {
+  ADMIN
+  CLIENT_DIRECTOR
+  VIEWER
+}
+
+enum SourceType {
+  URL
+  PDF
+  DOCUMENT
+  FAQ
+}
+
+enum SourceStatus {
+  PENDING
+  CRAWLING
+  INDEXED
+  FAILED
+}
+
+enum MessageRole {
+  USER
+  ASSISTANT
+  SYSTEM
+}
+
+model User {
+  id           String   @id @default(uuid())
+  name         String
+  email        String   @unique
+  passwordHash String
+  role         Role     @default(CLIENT_DIRECTOR)
+  organization String?  @default("BRIM Workspace")
+  avatar       String?  @default("SS")
+  plan         String?  @default("Growth Pro")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([email])
+}
+
+model Project {
+  id                 String              @id @default(uuid())
+  name               String
+  slug               String              @unique
+  industry           String              @default("real-estate")
+  industryName       String              @default("Real Estate & Property")
+  websiteUrl         String
+  description        String?
+  systemInstructions String?
+  avatar             String?             @default("🏢")
+  primaryColor       String?             @default("#C85C4A")
+  tone               String?             @default("Warm, Consultative & Friendly")
+  welcomeMessage     String?
+  suggestedQuestions String[]            @default([])
+  leadCaptureEnabled Boolean             @default(true)
+  leadCaptureFields  String[]            @default(["name", "phone", "email"])
+  isActive           Boolean             @default(true)
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  knowledgeSources   KnowledgeSource[]
+  knowledgeDocuments KnowledgeDocument[]
+  knowledgeChunks    KnowledgeChunk[]
+  chatSessions       ChatSession[]
+  leads              Lead[]
+  analyticsEvents    AnalyticsEvent[]
+
+  @@index([slug])
+  @@index([industry])
+}
+
+model KnowledgeSource {
+  id               String              @id @default(uuid())
+  projectId        String
+  project          Project             @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  type             SourceType          @default(URL)
+  url              String
+  title            String
+  status           SourceStatus        @default(PENDING)
+  size             String?             @default("180 KB")
+  lastCrawledAt    DateTime?
+  lastIndexedAt    DateTime?
+  contentHash      String?
+  errorMessage     String?
+  extractedSummary String?
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+  documents        KnowledgeDocument[]
+
+  @@index([projectId])
+  @@index([status])
+}
+
+model KnowledgeDocument {
+  id          String           @id @default(uuid())
+  sourceId    String
+  source      KnowledgeSource  @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  projectId   String
+  project     Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  title       String
+  url         String
+  content     String
+  metadata    Json             @default("{}")
+  contentHash String
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  chunks      KnowledgeChunk[]
+
+  @@index([projectId])
+  @@index([sourceId])
+  @@index([contentHash])
+  @@index([url])
+}
+
+model KnowledgeChunk {
+  id          String                 @id @default(uuid())
+  documentId  String
+  document    KnowledgeDocument      @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  projectId   String
+  project     Project                @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  content     String
+  embedding   Unsupported("vector")?
+  metadata    Json                   @default("{}")
+  chunkIndex  Int                    @default(0)
+  createdAt   DateTime               @default(now())
+
+  @@index([projectId])
+  @@index([documentId])
+  @@index([chunkIndex])
+}
+
+model ChatSession {
+  id              String           @id @default(uuid())
+  projectId       String
+  project         Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  visitorId       String?
+  userName        String?
+  intent          String?
+  location        String?
+  sessionMetadata Json             @default("{}")
+  startedAt       DateTime         @default(now())
+  lastActivityAt  DateTime         @default(now())
+  messages        ChatMessage[]
+  leads           Lead[]
+  analyticsEvents AnalyticsEvent[]
+
+  @@index([projectId])
+  @@index([visitorId])
+  @@index([lastActivityAt])
+}
+
+model ChatMessage {
+  id        String      @id @default(uuid())
+  sessionId String
+  session   ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  role      MessageRole @default(USER)
+  content   String
+  metadata  Json        @default("{}")
+  createdAt DateTime    @default(now())
+
+  @@index([sessionId])
+  @@index([createdAt])
+}
+
+model Lead {
+  id          String       @id @default(uuid())
+  projectId   String
+  project     Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  sessionId   String?
+  session     ChatSession? @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+  name        String
+  phone       String
+  email       String?
+  intent      String?
+  preferences Json         @default("{}")
+  source      String       @default("chatbot")
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  @@index([projectId])
+  @@index([sessionId])
+  @@index([phone])
+  @@index([email])
+}
+
+model AnalyticsEvent {
+  id        String       @id @default(uuid())
+  projectId String
+  project   Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  sessionId String?
+  session   ChatSession? @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+  eventType String
+  metadata  Json         @default("{}")
+  createdAt DateTime     @default(now())
+
+  @@index([projectId])
+  @@index([sessionId])
+  @@index([eventType])
+  @@index([createdAt])
+}
