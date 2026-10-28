@@ -309,7 +309,7 @@ export class BrochureService {
           .fontSize(8.5)
           .fillColor('#334155')
           .text(
-            `${OFFICIAL_PRYCOONS_CONTACT.contactCallToAction} Connect directly with our team through the BRIM AI Assistant or our official contact desk:`,
+            `${OFFICIAL_PRYCOONS_CONTACT.contactCallToAction} Connect directly with our team through the Prycoons Assistant or our official contact desk:`,
             leftMargin + 12,
             boxY + 24,
             { width: pageWidth - 24 }
@@ -335,7 +335,7 @@ export class BrochureService {
           .fontSize(7.5)
           .fillColor('#94A3B8')
           .text(
-            `© ${new Date().getFullYear()} Prycoons Real Estate. All rights reserved. Generated via BRIM Assistant. Official Verification ID: PRY-${Date.now().toString(36).toUpperCase()}`,
+            `© ${new Date().getFullYear()} Prycoons Real Estate. All rights reserved. Generated via Prycoons Assistant. Official Verification ID: PRY-${Date.now().toString(36).toUpperCase()}`,
             leftMargin,
             footerY,
             { width: pageWidth, align: 'center' }

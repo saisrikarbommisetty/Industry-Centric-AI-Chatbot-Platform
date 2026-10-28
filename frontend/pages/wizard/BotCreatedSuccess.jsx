@@ -85,7 +85,7 @@ export const BotCreatedSuccess = () => {
         </span>
 
         <h1 style={{ fontSize: '1.85rem', fontWeight: 800, marginBottom: '0.4rem' }}>
-          {currentBot?.name || 'BRIM Assistant'} is Ready!
+          {currentBot?.name || 'Prycoons Assistant'} is Ready!
         </h1>
 
         <p style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', maxWidth: '500px', margin: '0 auto 2rem', lineHeight: 1.55 }}>

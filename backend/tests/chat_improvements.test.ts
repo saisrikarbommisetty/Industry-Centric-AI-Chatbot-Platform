@@ -24,7 +24,7 @@ async function runChatImprovementsTests() {
   // Ensure project exists
   await projectRepository.create({
     id: projectId,
-    name: 'BRIM Real Estate Assistant',
+    name: 'Prycoons Real Estate Assistant',
     slug: 'prycoons-ai',
     industry: 'real-estate',
     industryName: 'Real Estate & Property',

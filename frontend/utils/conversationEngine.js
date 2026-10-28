@@ -124,25 +124,58 @@ const HUMAN_FILLERS = [
   'Hmm 🤔 let me look that up for you.'
 ];
 
+export const PRYCOONS_WELCOME_MESSAGES = [
+  "Welcome to Prycoons! May I know your name, or are you looking to explore properties in Ahmedabad?",
+  "Hi there! What should I call you, or are you looking to buy or rent a property in Ahmedabad?",
+  "Hello! Welcome to Prycoons. What is your name, or how can we assist with your property search?",
+  "Hi! Welcome to Prycoons. May I have your name, or let's find a property that suits your needs.",
+  "Welcome to Prycoons! What should we call you, or what kind of property are you looking for?",
+];
+
+export const getWelcomeMessageForSession = (sessionId = '') => {
+  if (!sessionId) {
+    const idx = Math.floor(Math.random() * PRYCOONS_WELCOME_MESSAGES.length);
+    return PRYCOONS_WELCOME_MESSAGES[idx];
+  }
+  let hash = 0;
+  for (let i = 0; i < sessionId.length; i++) {
+    hash = (hash << 5) - hash + sessionId.charCodeAt(i);
+    hash |= 0;
+  }
+  const idx = Math.abs(hash) % PRYCOONS_WELCOME_MESSAGES.length;
+  return PRYCOONS_WELCOME_MESSAGES[idx];
+};
+
 /**
  * Creates a fresh conversation session
  */
-export const createInitialSession = (bot = null) => {
+export const createInitialSession = (bot = null, customSessionId = null) => {
   const timeCtx = getTimeContext();
-  const botName = bot?.name || 'Prycoons Assistant';
+  const botName = bot?.name || 'Prycoons Real Estate Assistant';
   const isRealEstate = !bot || bot.industryId === 'real-estate' || bot.id === 'prycoons-ai';
   const isMarketing = bot?.industryId === 'marketing' || bot?.industryId === 'ecommerce' || bot?.id?.includes('brand') || bot?.id?.includes('market');
+
+  const sessionId = customSessionId || ('sess-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7));
 
   let initialText = '';
   let initialQuickReplies = [];
 
-  // Initial welcome message identifying BRIM Real Estate Assistant
-  const minimalGreeting = "Hi 👋 Welcome to BRIM Real Estate Assistant! I'm here to help you explore properties and find a home that suits your needs. What should I call you?";
-  initialText = minimalGreeting;
-  // Simple quick replies prompting name input
-  initialQuickReplies = ['I am Rahul', 'Call me Rahul', 'Looking to explore'];
+  if (isRealEstate) {
+    // Dynamic single-sentence welcome message representing Prycoons Real Estate
+    initialText = getWelcomeMessageForSession(sessionId);
+    initialQuickReplies = ['Looking to Buy 🏡', 'Thinking of Renting 🔑', 'Just Exploring ✨'];
+  } else if (isMarketing) {
+    initialText = "Hi there! Welcome to Apex Brand Studio. How can we assist your brand today?";
+    initialQuickReplies = ['Brand identity & logo 🎨', 'Website & UX design 💻', 'Social media growth 📈'];
+  } else {
+    initialText = bot?.welcomeMessage || `Welcome to ${botName}! How can we help you today?`;
+    initialQuickReplies = bot?.suggestedQuestions || ['Looking to Buy 🏡', 'Thinking of Renting 🔑', 'Just Exploring ✨'];
+  }
 
   return {
+    id: sessionId,
+    sessionId: sessionId,
+    welcomeMessage: initialText,
     state: 'GREETING',
     stepIndex: 0,
     userName: '',
@@ -183,6 +216,32 @@ export const createInitialSession = (bot = null) => {
   };
 };
 
+// Forbidden names that should never be captured as user's name
+export const FORBIDDEN_NAMES = new Set([
+  'yes', 'yeah', 'yep', 'yup', 'sure', 'ok', 'okay', 'fine', 'no', 'nope', 'nah',
+  'hi', 'hello', 'hey', 'namaste', 'greetings', 'good morning', 'good afternoon', 'good evening',
+  'buy', 'buying', 'rent', 'renting', 'explore', 'exploring', 'browse', 'browsing', 'invest', 'investing',
+  'property', 'properties', 'flat', 'flats', 'apartment', 'apartments', 'house', 'houses', 'villa', 'villas',
+  'bhk', '1bhk', '2bhk', '3bhk', '4bhk', '5bhk',
+  'ahmedabad', 'gota', 'sola', 'science city', 'bodakdev', 'ambli', 'tragad', 'prahlad nagar',
+  'crore', 'lakh', 'budget', 'price', 'rates',
+  'nothing', 'none', 'later', 'skip', 'idk', 'dont know', "don't know", 'prefer not to say', 'no name',
+  'please', 'thanks', 'thank you', 'welcome', 'great', 'awesome', 'cool', 'friend'
+]);
+
+export const isValidPersonName = (name) => {
+  if (!name) return false;
+  const cleaned = name.trim().toLowerCase().replace(/[^a-zA-Z\s]/g, '');
+  if (!cleaned || cleaned.length < 2 || cleaned.length > 30) return false;
+  if (FORBIDDEN_NAMES.has(cleaned)) return false;
+  const words = cleaned.split(/\s+/);
+  if (words.length > 3) return false;
+  for (const w of words) {
+    if (FORBIDDEN_NAMES.has(w)) return false;
+  }
+  return true;
+};
+
 /**
  * Natural Name Extractor
  */
@@ -190,22 +249,25 @@ const extractName = (text) => {
   if (!text) return '';
   const cleaned = text.trim();
   
-  // "I am Rahul", "My name is Rahul Sharma", "This is Rahul", "Call me Rahul"
-  const patterns = [
-    /(?:i am|i'm|my name is|this is|call me|myself)\s+([a-zA-Z]+(?:\s+[a-zA-Z]+)?)/i,
-    /^([a-zA-Z]+(?:\s+[a-zA-Z]+)?)$/
-  ];
-
-  for (const pat of patterns) {
-    const match = cleaned.match(pat);
-    if (match && match[1]) {
-      const candidate = match[1].trim();
-      const forbidden = ['hi', 'hello', 'hey', 'yes', 'no', 'looking', 'buy', 'rent', 'browse', 'homes', 'good'];
-      if (!forbidden.includes(candidate.toLowerCase())) {
-        return candidate.split(' ')[0].charAt(0).toUpperCase() + candidate.split(' ')[0].slice(1);
-      }
+  // Pattern 1: Explicit introduction prefixes
+  const prefixMatch = cleaned.match(
+    /(?:i am|i'm|my name is|this is|call me|myself|you can call me)\s+([a-zA-Z]+(?:\s+[a-zA-Z]+)?)/i
+  );
+  if (prefixMatch && prefixMatch[1]) {
+    const candidate = prefixMatch[1].trim();
+    if (isValidPersonName(candidate)) {
+      return candidate.split(/\s+/).map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
     }
   }
+
+  // Pattern 2: Standalone 1-2 word name
+  const words = cleaned.split(/\s+/);
+  if (words.length <= 2 && /^[a-zA-Z\s]+$/.test(cleaned)) {
+    if (isValidPersonName(cleaned)) {
+      return cleaned.split(/\s+/).map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
+    }
+  }
+
   return '';
 };
 
@@ -340,20 +402,36 @@ export const processUserMessage = (userText, session, bot) => {
   if (foundEmail && !session.lead.email) {
     session.lead.email = foundEmail;
   }
-  // Location — only store if not already known
+  // Location
   const foundLocation = extractLocation(text);
-  if (foundLocation && !session.discovery.location) {
+  if (foundLocation) {
     session.discovery.location = foundLocation;
   }
-  // Home type — only store if not already known
+  // Home type
   const foundHomeType = extractHomeType(text);
-  if (foundHomeType && !session.discovery.homeType) {
+  if (foundHomeType) {
     session.discovery.homeType = foundHomeType;
+    session.discovery.bhk = foundHomeType.match(/\d\s*BHK/i)?.[0] || foundHomeType;
   }
-  // Intent signals — only store if not already known
-  if (!session.intent) {
-    if (/\brent\b|\brenting\b/.test(textLower)) session.intent = 'rent';
-    else if (/\bbuy\b|\bbuying\b|\bpurchase\b|\blooking for\b|\bwant\b|\bneed\b/.test(textLower)) session.intent = 'buy';
+  // Intent signals — never default unspecified intent to buy or rent
+  const isComparisonOrQuestion =
+    /\b(should i|difference between|vs|versus|better to|recommend|what does|meaning of)\b/i.test(textLower) ||
+    /\b(buy or rent|rent or buy)\b/i.test(textLower);
+
+  if (!isComparisonOrQuestion) {
+    if (/\b(currently|now)\s+(want to\s+)?(buy|purchase)\b/i.test(textLower)) {
+      session.intent = 'buy';
+    } else if (/\b(currently|now)\s+(want to\s+)?(rent|lease)\b/i.test(textLower)) {
+      session.intent = 'rent';
+    } else if (/\b(looking to buy|want to buy|to buy|buying|buy)\b/i.test(textLower) && !/\b(rent|renting)\b/i.test(textLower)) {
+      session.intent = 'buy';
+    } else if (/\b(looking to rent|want to rent|to rent|renting|rent|lease)\b/i.test(textLower) && !/\b(buy|buying)\b/i.test(textLower)) {
+      session.intent = 'rent';
+    } else if (/\b(looking to buy|want to buy)\b/i.test(textLower)) {
+      session.intent = 'buy';
+    } else if (/\b(looking to rent|want to rent)\b/i.test(textLower)) {
+      session.intent = 'rent';
+    }
   }
   // ─────────────────────────────────────────────────────────────────────────
 
@@ -361,12 +439,12 @@ export const processUserMessage = (userText, session, bot) => {
   // 1. GREETING & NAME CAPTURE STAGE
   // =========================================================================
   if (session.state === 'GREETING') {
+    const isAffirmative = /^(yes|yeah|yep|yup|sure|ok|okay|definitely|absolutely|interested|i am interested|yes please)\b/i.test(text);
+    const isDeclining = /^(no|nope|nah|skip|later|no thanks|prefer not to say|no name|don't want to share|dont want to share)\b/i.test(text);
+
     if (foundName) {
       session.userName = foundName;
       session.lead.name = foundName;
-    } else if (!session.userName && text.length < 25 && !textLower.includes('help') && !textLower.includes('explore')) {
-      session.userName = text.split(' ')[0].replace(/[^a-zA-Z]/g, '') || 'Friend';
-      session.lead.name = session.userName;
     }
 
     const userNameStr = session.userName ? `, ${session.userName}` : '';
@@ -389,8 +467,15 @@ export const processUserMessage = (userText, session, bot) => {
       nextState = 'HOSPITALITY_INTENT';
     } else {
       // REAL ESTATE DEFAULT
-      const nameGreeting = session.userName ? `, ${session.userName}` : '';
-      replyText = `Nice to meet you${nameGreeting}! 👋 Are you looking to buy, rent, or just exploring?`;
+      if (session.userName) {
+        replyText = `Nice to meet you, ${session.userName}! 👋 Are you looking to buy, rent, or just exploring in Ahmedabad?`;
+      } else if (isAffirmative) {
+        replyText = `Wonderful! Are you looking to buy, rent, or just exploring in Ahmedabad?`;
+      } else if (isDeclining) {
+        replyText = `No problem at all! Let's get straight to finding your ideal property. Are you looking to buy, rent, or just exploring in Ahmedabad?`;
+      } else {
+        replyText = `Are you looking to buy, rent, or just exploring in Ahmedabad?`;
+      }
       quickReplies = ['Looking to Buy 🏡', 'Thinking of Renting 🔑', 'Just Exploring ✨'];
       nextState = 'INTENT_DETECTION';
     }
@@ -446,19 +531,19 @@ export const processUserMessage = (userText, session, bot) => {
         quickReplies = ['Big Balcony / Terrace 🌅', 'Spacious Chef Kitchen 🍳', 'Garden & Greenery 🌳', 'Clubhouse, Gym & Pool 🏊', 'High-speed EV Parking ⚡'];
         nextState = 'DISCOVERY_MUST_HAVE';
       } else if (session.discovery.homeType) {
-        // Home type known, need location → skip personal, skip home type
-        replyText = `Great — a **${session.discovery.homeType}** 👍.\n\nWhich area in Ahmedabad are you considering?`;
-        quickReplies = ['Ambli', 'SG Highway', 'Bodakdev', 'Science City / Sola', 'GIFT City', 'Gota'];
+        // Home type known, need location
+        replyText = `Got it, a **${session.discovery.homeType}** 👍.\n\nWhich locality in Ahmedabad do you prefer?`;
+        quickReplies = ['Gota', 'Science City / Sola', 'Tragad', 'Ambli / SG Highway', 'Bodakdev'];
         nextState = 'DISCOVERY_LOCATION';
       } else if (session.discovery.location) {
-        // Location known, need home type → skip personal, skip location
-        replyText = `Exciting! Buying in **${session.discovery.location}** — great choice 🏡.\n\nAre you thinking 2BHK, 3BHK, or something larger?`;
-        quickReplies = ['2 BHK Smart Unit', '3 BHK Luxury', '4 & 5 BHK Sky Villa', 'Open to options'];
+        // Location known, need home type
+        replyText = `How many BHK are you looking for in **${session.discovery.location}**?`;
+        quickReplies = ['2 BHK', '3 BHK', '4 BHK', 'Open to options'];
         nextState = 'DISCOVERY_HOME_TYPE';
       } else {
-        replyText = `Exciting! Buying a home is a wonderful milestone 🏡.\n\nBefore we dive into locations, quick one 😄 — do you prefer **Netflix nights in a cozy lounge 🍿** or **morning walks on a wide open balcony 🌅**?`;
-        quickReplies = ['Netflix nights 🍿', 'Morning walks & balcony 🌅', 'Both are essential! ✨'];
-        nextState = 'DISCOVERY_PERSONAL';
+        replyText = `Exciting! Buying a home is a wonderful milestone 🏡.\n\nHow many BHK are you looking for?`;
+        quickReplies = ['2 BHK', '3 BHK', '4 BHK', 'Open to options'];
+        nextState = 'DISCOVERY_HOME_TYPE';
       }
     }
   }

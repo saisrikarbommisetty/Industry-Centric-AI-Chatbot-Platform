@@ -118,7 +118,7 @@ export class ChatController {
         return {
           id: s.id,
           botId: s.projectId,
-          botName: 'BRIM Real Estate Assistant',
+          botName: 'Prycoons Real Estate Assistant',
           userName: s.userName || meta.userName || meta.lead?.name || 'Website Visitor',
           userEmail: meta.lead?.email || 'visitor@example.com',
           userPhone: meta.lead?.phone || '+91 98000 00000',

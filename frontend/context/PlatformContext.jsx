@@ -36,7 +36,19 @@ export const PlatformProvider = ({ children }) => {
   // Assistants / Bots State
   const [bots, setBots] = useState(() => {
     const saved = localStorage.getItem('brim_bots');
-    return saved ? JSON.parse(saved) : INITIAL_BOTS;
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        return parsed.map((b) =>
+          b.id === 'prycoons-ai' && (b.name.includes('BRIM') || b.welcomeMessage?.includes('BRIM'))
+            ? { ...b, name: 'Prycoons Real Estate Assistant', welcomeMessage: 'Welcome to Prycoons! How can we help with your property search?' }
+            : b
+        );
+      } catch {
+        return INITIAL_BOTS;
+      }
+    }
+    return INITIAL_BOTS;
   });
 
   // Knowledge Sources State
@@ -48,7 +60,19 @@ export const PlatformProvider = ({ children }) => {
   // Conversations State
   const [conversations, setConversations] = useState(() => {
     const saved = localStorage.getItem('brim_conversations');
-    return saved ? JSON.parse(saved) : INITIAL_CONVERSATIONS;
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        return parsed.map((c) =>
+          c.botName && c.botName.includes('BRIM Real Estate')
+            ? { ...c, botName: 'Prycoons Real Estate Assistant' }
+            : c
+        );
+      } catch {
+        return INITIAL_CONVERSATIONS;
+      }
+    }
+    return INITIAL_CONVERSATIONS;
   });
 
   // Toast Notifications
@@ -226,7 +250,7 @@ export const PlatformProvider = ({ children }) => {
       status: 'active',
       model: 'BRIM Conversational Model',
       tone: botData.tone || 'Professional & Consultative',
-      welcomeMessage: botData.welcomeMessage || `Hello 👋 Welcome to ${botData.name || 'our assistant'}. How can we help you today?`,
+      welcomeMessage: botData.welcomeMessage || `Welcome to ${botData.name || 'Prycoons'}! How can we help you today?`,
       promptGuidelines: botData.promptGuidelines || 'Provide clear and accurate project details, answers to visitor questions, and assist with bookings.',
       leadCaptureEnabled: botData.leadCaptureEnabled !== undefined ? botData.leadCaptureEnabled : true,
       leadCaptureFields: botData.leadCaptureFields || ['name', 'phone', 'email'],

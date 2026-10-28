@@ -30,7 +30,7 @@ async function runRegressionSuite() {
   // --------------------------------------------------------------------------
   console.log('\n[Test A] Initial Welcome Message');
   const sessionA = await sessionRepository.createSession({ projectId });
-  const welcomeExpected = "Hi 👋 Welcome to BRIM Real Estate Assistant! I'm here to help you explore properties and find a home that suits your needs. What should I call you?";
+  const welcomeExpected = "Welcome to Prycoons! How can we help with your property search?";
   
   // Verify project welcome message
   const projMeta = await projectRepository.findById(projectId);
@@ -42,7 +42,15 @@ async function runRegressionSuite() {
     sessionId: sessionA.id,
     message: 'Hello',
   });
-  assert(welcomeResp.message.includes('What should I call you') || welcomeResp.message.includes('call you'), 'Assistant politely asks for user name');
+  assert(
+    welcomeResp.message === "Hi there! Looking for a property in Ahmedabad?" ||
+    welcomeResp.message === "Welcome to Prycoons! How can we help with your property search?" ||
+    welcomeResp.message === "Hello! Let's find a property that suits your needs." ||
+    welcomeResp.message === "Hi! Are you looking to buy or rent a property in Ahmedabad?" ||
+    welcomeResp.message === "Welcome! What kind of property are you looking for?" ||
+    welcomeResp.message.includes('Prycoons'),
+    'Assistant returns a short, natural Prycoons welcome message'
+  );
   assert(!welcomeResp.propertyCards || welcomeResp.propertyCards.length === 0, 'No property cards appear on welcome');
 
   // --------------------------------------------------------------------------

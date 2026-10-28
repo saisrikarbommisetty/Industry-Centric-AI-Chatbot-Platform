@@ -302,7 +302,7 @@ export class VisitService {
     const filename = `Prycoons_Property_Visit_Requests_${todayStr}.xlsx`;
 
     const workbook = new ExcelJS.Workbook();
-    workbook.creator = 'BRIM Real Estate Assistant';
+    workbook.creator = 'Prycoons Real Estate Assistant';
     workbook.lastModifiedBy = 'Prycoons Admin';
     workbook.created = new Date();
     workbook.modified = new Date();
@@ -511,7 +511,7 @@ export class VisitService {
       bhk: p.bhk || p.homeType || null,
       propertyPrice: p.propertyPrice || p.budget || null,
       assistantId: p.assistantId || lead.projectId,
-      assistantName: p.assistantName || 'BRIM Real Estate Assistant',
+      assistantName: p.assistantName || 'Prycoons Real Estate Assistant',
       conversationId: p.conversationId || lead.sessionId || null,
       visitStatus: (p.visitStatus as VisitStatus) || 'New Request',
       customerNotes: p.customerNotes || p.notes || null,

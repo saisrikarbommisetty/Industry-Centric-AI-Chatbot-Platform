@@ -19,7 +19,7 @@ async function runIngest() {
   if (!project) {
     project = await projectRepository.create({
       id: 'prycoons-ai',
-      name: 'BRIM Real Estate Assistant',
+      name: 'Prycoons Real Estate Assistant',
       slug: 'prycoons-ai',
       industry: 'real-estate',
       industryName: 'Real Estate & Property',

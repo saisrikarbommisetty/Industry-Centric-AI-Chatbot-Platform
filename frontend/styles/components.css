@@ -493,10 +493,16 @@
   white-space: nowrap;
 }
 
-.suggestion-pill:hover {
+.suggestion-pill:hover:not(:disabled) {
   border-color: var(--primary);
   color: var(--primary);
   background-color: var(--primary-subtle);
+}
+
+.suggestion-pill:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  pointer-events: none;
 }
 
 /* ==========================================================================

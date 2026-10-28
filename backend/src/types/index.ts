@@ -161,6 +161,7 @@ export interface ConversationLeadState {
 export interface ChatSessionMetadata {
   state: string;
   stepIndex: number;
+  welcomeMessage?: string;
   userName?: string;
   userLocation?: string;
   industryId?: string;

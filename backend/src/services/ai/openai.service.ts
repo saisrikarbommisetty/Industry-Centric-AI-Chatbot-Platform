@@ -89,7 +89,7 @@ export class OpenAIService {
 
     try {
       const state = params.currentUserState || {};
-      const systemPrompt = `You are the Conversational Intelligence Engine for BRIM Real Estate Assistant in Ahmedabad, Gujarat, India.
+      const systemPrompt = `You are the Conversational Intelligence Engine for Prycoons Real Estate Assistant in Ahmedabad, Gujarat, India.
 Analyze the user message in the context of recent chat history and current user state.
 Return a valid JSON object matching this schema:
 {
@@ -125,11 +125,16 @@ Intent Classification Guidelines:
 8. "LEAD_CAPTURE": User providing contact phone or email.
 9. "CONVERSATION": Thanks, ok, cool, bye.
 
-Context Resolution Rules:
+- Context Resolution Rules:
 - If user refers to previous locality ("there", "in that area", "same place"), resolve location to "${state.location || ''}".
 - If user requests a new locality (e.g. "Actually forget Bodakdev, what about Gota?"), location is "Gota".
 - If user clicks or says "explore other properties" or searches without budget, set relaxBudget to true.
-- If user refers to "first one"/"first property" -> referencedPropertyIndex: 0. "second one" -> 1. "third one" -> 2.`;
+- If user refers to "first one"/"first property" -> referencedPropertyIndex: 0. "second one" -> 1. "third one" -> 2.
+- INTENT (BUY/RENT) EXTRACTION: Set "intent" in extractedCriteria to "buy" or "rent" ONLY if the user has genuinely expressed their personal search requirement (e.g., "I want to buy a property", "looking to rent a flat", "I'm looking to buy").
+- NEVER assume or default intent! If the user asks an advisory/comparison question (e.g., "Should I buy or rent?", "Is it better to buy or rent?", "Difference between buying and renting"), intent MUST BE NULL, and the main intent MUST be "GENERAL_QUESTION"!
+- NAME EXTRACTION: Extract "name" ONLY when user genuinely introduces themselves (e.g. "I am Rahul", "Rahul", "My name is Priya", "Call me Rahul"). If the user says "Call me Rahul", extract name: "Rahul", do NOT interpret the word "call" as a property search intent, and do NOT infer BUY or RENT.
+- NEVER extract words like "yes", "yeah", "yep", "sure", "ok", "okay", "fine", "no", "skip", "buy", "rent", "explore" as a name! If user says "yes" or answers affirmatively, name MUST be null, and intent should be "FLOW_ANSWER".
+- PREFERENCE UPDATES: If user changes a requirement (e.g. "Actually, show me 2BHK properties instead"), extract the updated criteria (bhk: "2 BHK") and classify intent as "PROPERTY_SEARCH".`;
 
       const userPrompt = `
 Current User State:
@@ -239,8 +244,8 @@ Respond with JSON.
     }
 
     // 4. General real estate question
-    const isQuestion = tl.includes('?') || /\b(why|what is|how to|is it|is [a-zA-Z\s]+ good|risks of|difference between|explain|pros and cons)\b/i.test(tl);
-    const isSearchWord = /\b(show me|find me|recommend|options in|properties in|flats in)\b/i.test(tl);
+    const isQuestion = tl.includes('?') || /\b(why|what is|what does|how to|is it|is [a-zA-Z\s]+ good|risks of|difference between|explain|pros and cons|should i|better to|mean|meaning)\b/i.test(tl);
+    const isSearchWord = /\b(show me|find me|recommend|options in|properties in|flats in|list of)\b/i.test(tl);
 
     if (isQuestion && !isSearchWord) {
       return {
@@ -251,14 +256,37 @@ Respond with JSON.
       };
     }
 
-    // 5. Explicit Property search
-    if (isSearchWord || tl.includes('explore other') || tl.includes('bhk')) {
+    // 5. Property search or Criteria Declaration
+    const hasBhk = /\b([1-5])\s*bhk\b/i.test(tl) || /\b(one|two|three|four|five)\s*bhk\b/i.test(tl);
+    const hasBuy = /\b(want to buy|looking to buy|buy a|to buy|buying|buy)\b/i.test(tl) && !/\b(should i|vs|or rent)\b/i.test(tl);
+    const hasRent = /\b(want to rent|looking to rent|rent a|to rent|renting|rent)\b/i.test(tl) && !/\b(should i|vs|or buy)\b/i.test(tl);
+
+    let bhkMatch: string | undefined = undefined;
+    const bMatch = tl.match(/\b([1-5])\s*bhk\b/i);
+    if (bMatch) bhkMatch = `${bMatch[1]} BHK`;
+
+    let locMatch: string | undefined = undefined;
+    const locNames = ['gota', 'science city', 'sola', 'bodakdev', 'ambli', 'tragad', 'chandkheda', 'thaltej', 'vastrapur', 'prahlad nagar'];
+    for (const loc of locNames) {
+      if (tl.includes(loc)) {
+        locMatch = loc.split(' ').map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+        break;
+      }
+    }
+
+    if (isSearchWord || tl.includes('explore other') || hasBhk || hasBuy || hasRent || locMatch) {
       const relaxBudget = tl.includes('explore other') || tl.includes('other properties');
+      const intentVal: 'buy' | 'rent' | undefined = hasRent ? 'rent' : hasBuy ? 'buy' : undefined;
       return {
-        intent: 'PROPERTY_SEARCH',
-        extractedCriteria: { relaxBudget },
+        intent: (isSearchWord || (hasBhk && locMatch)) ? 'PROPERTY_SEARCH' : 'FLOW_ANSWER',
+        extractedCriteria: {
+          relaxBudget,
+          bhk: bhkMatch,
+          location: locMatch,
+          intent: intentVal,
+        },
         requiresDirectAnswer: false,
-        requiresPropertyRetrieval: true,
+        requiresPropertyRetrieval: Boolean(isSearchWord || (hasBhk && locMatch)),
       };
     }
 

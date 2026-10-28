@@ -26,7 +26,7 @@ export async function seedDatabase() {
   logger.info('Creating primary project: Prycoons Real Estate Assistant');
   const prycoons = await projectRepository.create({
     id: 'prycoons-ai',
-    name: 'BRIM Real Estate Assistant',
+    name: 'Prycoons Real Estate Assistant',
     slug: 'prycoons-ai',
     industry: 'real-estate',
     industryName: 'Real Estate & Property',
@@ -36,7 +36,7 @@ export async function seedDatabase() {
     avatar: '🏢',
     primaryColor: '#C85C4A',
     tone: 'Warm, Consultative & Friendly',
-    welcomeMessage: "Hi 👋 Welcome to BRIM Real Estate Assistant! I'm here to help you explore properties and find a home that suits your needs. What should I call you?",
+    welcomeMessage: "Welcome to Prycoons! How can we help with your property search?",
     suggestedQuestions: ['Looking to Buy 🏡', 'Thinking of Renting 🔑', 'Just Browsing ✨', 'Explore properties'],
     leadCaptureEnabled: true,
     leadCaptureFields: ['name', 'phone', 'email'],

@@ -13,6 +13,14 @@ import { logger } from '../../utils/logger';
 import { OFFICIAL_PRYCOONS_CONTACT } from '../../config/organization';
 import { visitService } from '../visits/visit.service';
 import {
+  PRYCOONS_WELCOME_MESSAGES,
+  getWelcomeMessageForSession,
+  isValidPersonName,
+  formatPersonName,
+  extractPersonNameFromText,
+} from '../../config/greetings';
+export { PRYCOONS_WELCOME_MESSAGES, getWelcomeMessageForSession };
+import {
   ChatSessionMetadata,
   ChatResponsePayload,
   PropertyCardData,
@@ -76,7 +84,7 @@ export class ConversationService {
     })();
 
     const [project, session] = await Promise.all([projectPromise, sessionPromise]);
-    const projectName = project?.name || 'BRIM Real Estate Assistant';
+    const projectName = project?.name || 'Prycoons Real Estate Assistant';
     const industry = project?.industry || 'real-estate';
     const websiteUrl = project?.websiteUrl || 'https://prycoons.com/';
 
@@ -228,6 +236,9 @@ export class ConversationService {
       };
     }
 
+    // Extract explicit entities directly from free-text user message
+    this.extractAndStoreMemory(userText, metadata);
+
     // Fetch recent messages for session context
     const recentDbMessages = await messageRepository.getRecentMessagesBySessionId(sessionId, 6);
     const historySummary = recentDbMessages
@@ -252,13 +263,11 @@ export class ConversationService {
     logger.info(`Message: "${userText}" -> LLM Interpretation: ${JSON.stringify(interpretation)}`);
 
     // Synchronize extracted entities into session metadata
-    if (interpretation.extractedCriteria?.name && !metadata.userName) {
-      metadata.userName = interpretation.extractedCriteria.name;
-      metadata.lead.name = interpretation.extractedCriteria.name;
-    }
-    if (interpretation.extractedCriteria?.name && !metadata.userName) {
-      metadata.userName = interpretation.extractedCriteria.name;
-      metadata.lead.name = interpretation.extractedCriteria.name;
+    const candidateName = extractPersonNameFromText(userText) || (isValidPersonName(interpretation.extractedCriteria?.name) ? interpretation.extractedCriteria!.name : null);
+    if (candidateName && !metadata.userName) {
+      const formatted = formatPersonName(candidateName);
+      metadata.userName = formatted;
+      metadata.lead.name = formatted;
     }
     if (interpretation.extractedCriteria?.phone && !metadata.lead.phone) {
       metadata.lead.phone = interpretation.extractedCriteria.phone;
@@ -289,8 +298,12 @@ export class ConversationService {
       }
     }
     if (interpretation.extractedCriteria?.bhk) {
-      metadata.discovery.bhk = interpretation.extractedCriteria.bhk;
-      if (!metadata.discovery.homeType) metadata.discovery.homeType = interpretation.extractedCriteria.bhk;
+      if (metadata.discovery.bhk !== interpretation.extractedCriteria.bhk) {
+        metadata.discovery.bhk = interpretation.extractedCriteria.bhk;
+        metadata.discovery.homeType = interpretation.extractedCriteria.bhk;
+        metadata.displayedPropertyTitles = [];
+        metadata.displayedProperties = [];
+      }
     }
     if (interpretation.extractedCriteria?.budgetNum) {
       metadata.discovery.budgetNum = interpretation.extractedCriteria.budgetNum;
@@ -304,21 +317,76 @@ export class ConversationService {
       metadata.discovery.budgetMax = undefined;
       metadata.discovery.rentMonthly = undefined;
     }
-    if (interpretation.extractedCriteria?.intent) {
+
+    const isComparisonOrQuestion =
+      /\b(should i|difference between|vs|versus|better to|recommend|what does|meaning of)\b/i.test(userText) ||
+      /\b(buy or rent|rent or buy)\b/i.test(userText);
+
+    if (interpretation.extractedCriteria?.intent && !isComparisonOrQuestion) {
       metadata.intent = interpretation.extractedCriteria.intent;
     }
     if (interpretation.extractedCriteria?.mustHave) {
       metadata.discovery.mustHave = interpretation.extractedCriteria.mustHave;
     }
 
-    // Check if user is answering the greeting name-collection prompt
+    // Check if user is answering the greeting name-collection prompt or opting out / confirming
     const hasPropertySearchWords = /(bhk|flat|apartment|propert|villa|crore|lakh|science city|gota|sola|bodakdev)/i.test(userText);
-    const hasNameSignal =
-      Boolean(interpretation.extractedCriteria?.name) ||
-      /(?:you can call me|i am|i'm|my name is|this is|call me)\s+[a-zA-Z]+/i.test(userText);
+    const isAffirmativeGreetingReply = /^(yes|yeah|yep|yup|sure|ok|okay|definitely|absolutely|interested|i am interested|yes please)\b/i.test(userText.trim());
+    const isDecliningNameReply = /^(no|nope|nah|skip|later|no thanks|prefer not to say|no name|don't want to share|dont want to share)\b/i.test(userText.trim());
+    const hasNameSignal = Boolean(candidateName);
     const isAnsweringGreeting =
+      !hasPropertySearchWords &&
       (metadata.state === 'GREETING' || (!metadata.userName && metadata.stepIndex <= 1)) &&
-      (hasNameSignal || (userText.trim().split(/\s+/).length <= 3 && !hasPropertySearchWords && !userText.toLowerCase().includes('buy') && !userText.toLowerCase().includes('rent')));
+      (hasNameSignal || isAffirmativeGreetingReply || isDecliningNameReply);
+
+    // In-flow name introduction handling: "Call me Rahul" during an active search flow
+    const isExplicitNameIntroduction =
+      /(?:call me|my name is|i am|this is)\s+[a-zA-Z]+/i.test(userText.trim()) ||
+      (isValidPersonName(userText.trim()) && metadata.state === 'GREETING');
+
+    if (isExplicitNameIntroduction && metadata.state !== 'GREETING' && !hasPropertySearchWords) {
+      if (candidateName) {
+        const formatted = formatPersonName(candidateName);
+        metadata.userName = formatted;
+        metadata.lead.name = formatted;
+      }
+      const missingField = this.getMissingDiscoveryField(metadata);
+      if (missingField === 'READY') {
+        return this.executePropertySearch(params, metadata, project, sessionId, saveUserMessagePromise, false, requestId, startTime);
+      }
+      const promptData = this.getPromptForMissingField(missingField, metadata);
+      const nameAckMsg = `Nice to meet you, ${metadata.userName}! 👋\n\n${promptData.message}`;
+      const ackReplies = promptData.quickReplies;
+      metadata.state = promptData.state;
+      await saveUserMessagePromise;
+      metadata.stepIndex += 1;
+      await Promise.all([
+        messageRepository.createMessage({
+          sessionId,
+          role: 'ASSISTANT',
+          content: nameAckMsg,
+          metadata: { sources: [], propertyCard: null, propertyCards: [] },
+        }),
+        sessionRepository.updateSession(sessionId, {
+          userName: metadata.userName,
+          intent: metadata.intent,
+          location: metadata.discovery.location,
+          sessionMetadata: metadata,
+        }),
+      ]);
+      return {
+        sessionId,
+        message: nameAckMsg,
+        context: metadata,
+        sources: [],
+        suggestions: ackReplies,
+        quickReplies: ackReplies,
+        propertyCard: null,
+        propertyCards: [],
+        leadCaptureRequired: false,
+        advisorConnected: false,
+      };
+    }
 
     const isBrochureRequest = /(brochure|download|pdf|catalogue|specifications)/i.test(userText);
 
@@ -384,7 +452,7 @@ export class ConversationService {
     // CASE B: OUT OF SCOPE (Movies, Coding, Sports, Cooking, Trivia, etc.)
     // ──────────────────────────────────────────────────────────────────────────
     else if (intent === 'OUT_OF_SCOPE') {
-      const aiPrompt = `You are BRIM Real Estate Assistant, helping users explore properties and real estate in Ahmedabad.
+      const aiPrompt = `You are Prycoons Real Estate Assistant, helping users explore properties and real estate in Ahmedabad.
 The user asked an off-topic or unrelated question: "${userText}".
 Acknowledge or politely and briefly address the question (under 35 words), and warmly guide the conversation back to exploring homes, flats, or commercial real estate in Ahmedabad.
 Keep the tone helpful, professional, friendly, and concise. Do NOT invent property listings or specific prices in this response.`;
@@ -400,7 +468,7 @@ Keep the tone helpful, professional, friendly, and concise. Do NOT invent proper
     // CASE C: GENERAL REAL ESTATE QUESTION (Definitions, comparisons, area advice)
     // ──────────────────────────────────────────────────────────────────────────
     else if (intent === 'GENERAL_REAL_ESTATE') {
-      const generalPrompt = `You are BRIM Real Estate Assistant, an expert property advisor representing Prycoons in Ahmedabad, Gujarat.
+      const generalPrompt = `You are Prycoons Real Estate Assistant, an expert property advisor representing Prycoons Real Estate in Ahmedabad, Gujarat.
 The user asked: "${userText}".
 Answer this question authoritatively, warmly, and concisely (under 95 words).
 - If the question is about an Ahmedabad area (like SG Highway, Bodakdev, Gota, Science City), provide authentic market perspective regarding infrastructure, connectivity, commercial expansion, appreciation potential, and lifestyle.
@@ -412,14 +480,24 @@ Answer this question authoritatively, warmly, and concisely (under 95 words).
       const aiResult = await openaiService.generateResponse(generalPrompt, userText, '');
       responseText = aiResult.text.replace(/\*{3,}/g, '**').trim();
 
-      // If user had an active pending greeting or location flow, bridge smoothly without trapping them
-      if (!metadata.userName && (metadata.state === 'GREETING' || metadata.state === 'INTENT_DETECTION')) {
-        quickReplies = ['Explore properties in Ahmedabad 🏡', 'Looking to Buy', 'Thinking of Renting'];
-      } else if (metadata.discovery.location) {
-        responseText += `\n\nWould you like to see verified properties in **${metadata.discovery.location}**?`;
-        quickReplies = [`Show properties in ${metadata.discovery.location} 🏡`, 'Explore other areas', 'Ask another question'];
+      // If user had an active pending flow, bridge smoothly without breaking the flow
+      const missingField = this.getMissingDiscoveryField(metadata);
+      if (missingField === 'INTENT') {
+        responseText += `\n\nAre you looking to buy, rent, or just exploring in Ahmedabad?`;
+        quickReplies = ['Looking to Buy 🏡', 'Thinking of Renting 🔑', 'Just Exploring ✨'];
+      } else if (missingField === 'BHK') {
+        responseText += metadata.discovery.location
+          ? `\n\nReturning to your search — how many BHK are you looking for in **${metadata.discovery.location}**?`
+          : `\n\nReturning to your search — how many BHK are you looking for?`;
+        quickReplies = ['2 BHK', '3 BHK', '4 BHK', 'Open to options'];
+      } else if (missingField === 'LOCATION') {
+        responseText += metadata.discovery.bhk
+          ? `\n\nReturning to your search — which locality in Ahmedabad do you prefer?`
+          : `\n\nReturning to your search — which locality in Ahmedabad do you prefer?`;
+        quickReplies = ['Gota', 'Science City / Sola', 'Tragad', 'Ambli / SG Highway', 'Bodakdev'];
       } else {
-        quickReplies = ['Explore properties in Ahmedabad 🏡', 'Looking to Buy', 'Ask another question'];
+        responseText += `\n\nWould you like me to show you verified matching properties in **${metadata.discovery.location}**?`;
+        quickReplies = [`Show properties in ${metadata.discovery.location} 🏡`, 'Explore other areas', 'Ask another question'];
       }
 
       propertyCard = null;
@@ -431,12 +509,22 @@ Answer this question authoritatively, warmly, and concisely (under 95 words).
     // ──────────────────────────────────────────────────────────────────────────
     else if (intent === 'GREETING') {
       if (metadata.userName) {
-        responseText = `Nice to meet you, ${metadata.userName}! 👋 Are you looking to buy, rent, or just exploring?`;
+        responseText = `Nice to meet you, ${metadata.userName}! 👋 Are you looking to buy, rent, or just exploring in Ahmedabad?`;
+        quickReplies = ['Looking to Buy 🏡', 'Thinking of Renting 🔑', 'Just Exploring ✨'];
+        metadata.state = 'INTENT_DETECTION';
+      } else if (isAffirmativeGreetingReply) {
+        responseText = `Wonderful! Are you looking to buy, rent, or just exploring in Ahmedabad?`;
+        quickReplies = ['Looking to Buy 🏡', 'Thinking of Renting 🔑', 'Just Exploring ✨'];
+        metadata.state = 'INTENT_DETECTION';
+      } else if (isDecliningNameReply) {
+        responseText = `No problem at all! Let's get straight to finding your ideal property. Are you looking to buy, rent, or just exploring in Ahmedabad?`;
         quickReplies = ['Looking to Buy 🏡', 'Thinking of Renting 🔑', 'Just Exploring ✨'];
         metadata.state = 'INTENT_DETECTION';
       } else {
-        responseText = "Hi 👋 Welcome to BRIM Real Estate Assistant! I'm here to help you explore properties and find a home that suits your needs. What should I call you?";
-        quickReplies = ['I am Rahul', 'Call me Rahul', 'Looking to explore'];
+        const welcome = metadata.welcomeMessage || getWelcomeMessageForSession(sessionId);
+        metadata.welcomeMessage = welcome;
+        responseText = welcome;
+        quickReplies = ['Looking to Buy 🏡', 'Thinking of Renting 🔑', 'Just Exploring ✨'];
         metadata.state = 'GREETING';
       }
     }
@@ -450,47 +538,10 @@ Answer this question authoritatively, warmly, and concisely (under 95 words).
       const isRentChoice = textLower.includes('thinking of renting') || textLower.includes('looking to rent') || textLower === 'rent' || textLower === 'renting';
       const isExploreChoice = textLower.includes('just exploring') || textLower.includes('exploring') || textLower === 'explore';
 
-      if ((metadata.state === 'INTENT_DETECTION' || isBuyChoice || isRentChoice || isExploreChoice) && !metadata.discovery.location && !metadata.discovery.bhk) {
-        metadata.state = 'DISCOVERY_LOCATION';
-        if (isRentChoice) {
-          metadata.intent = 'rent';
-          responseText = `Got it! Renting gives you fantastic flexibility 👍.\n\nWhich area in Ahmedabad are you considering?`;
-        } else if (isExploreChoice) {
-          metadata.intent = 'buy';
-          responseText = `Wonderful! Exploring is the best way to discover exciting opportunities ✨.\n\nWhich area in Ahmedabad would you like to explore first?`;
-        } else {
-          metadata.intent = 'buy';
-          responseText = `Exciting! Buying a home is a wonderful milestone 🏡.\n\nWhich area in Ahmedabad are you considering?`;
-        }
-        quickReplies = ['Gota', 'Science City / Sola', 'Tragad', 'Ambli / SG Highway', 'Bodakdev'];
-        await saveUserMessagePromise;
-        metadata.stepIndex += 1;
-        await Promise.all([
-          messageRepository.createMessage({
-            sessionId,
-            role: 'ASSISTANT',
-            content: responseText,
-            metadata: { sources: [], propertyCard: null, propertyCards: [] },
-          }),
-          sessionRepository.updateSession(sessionId, {
-            userName: metadata.userName,
-            intent: metadata.intent,
-            location: metadata.discovery.location,
-            sessionMetadata: metadata,
-          }),
-        ]);
-        return {
-          sessionId,
-          message: responseText,
-          context: metadata,
-          sources: [],
-          suggestions: quickReplies,
-          quickReplies,
-          propertyCard: null,
-          propertyCards: [],
-          leadCaptureRequired: false,
-          advisorConnected: false,
-        };
+      if (isRentChoice) {
+        metadata.intent = 'rent';
+      } else if (isBuyChoice || isExploreChoice) {
+        metadata.intent = 'buy';
       }
 
       // Direct handling for Action Buttons: "Adjust budget" or "Explore nearby areas"
@@ -596,65 +647,42 @@ Answer this question authoritatively, warmly, and concisely (under 95 words).
       }
 
       // Dynamic Missing Criteria Evaluation:
-      const hasLocation = Boolean(metadata.discovery.location);
-      const hasBHK = Boolean(metadata.discovery.bhk || metadata.discovery.homeType);
-      const hasBudget = Boolean(metadata.discovery.budget || metadata.discovery.budgetNum || metadata.discovery.rentMonthly);
-      const loc = metadata.discovery.location || 'Ahmedabad';
-      const bhk = metadata.discovery.bhk || (metadata.discovery.homeType?.includes('BHK') ? metadata.discovery.homeType.match(/\d\s*BHK/i)?.[0] : null) || metadata.discovery.homeType || '3 BHK';
-      const budgetStr = metadata.discovery.budget || (metadata.discovery.rentMonthly ? `₹${metadata.discovery.rentMonthly.toLocaleString('en-IN')}/month` : 'your budget');
-      const userIntent = metadata.intent || 'buy';
+      const missingField = this.getMissingDiscoveryField(metadata);
+      if (missingField === 'READY') {
+        return this.executePropertySearch(params, metadata, project, sessionId, saveUserMessagePromise, false, requestId, startTime);
+      }
 
-      // 1. All necessary criteria already provided
-      if (hasLocation && hasBHK && hasBudget) {
-        if (metadata.explicitSearchRequested) {
-          return this.executePropertySearch(params, metadata, project, sessionId, saveUserMessagePromise, false, requestId, startTime);
-        } else {
-          metadata.state = 'DISCOVERY_CONFIRM_SEARCH';
-          const rentTag = userIntent === 'rent' ? ' for rent' : '';
-          responseText = `Got it! A **${bhk}**${rentTag} in **${loc}** within **${budgetStr}** 👍.\n\nWould you like me to show you verified matching properties?`;
-          quickReplies = ['Yes, show matching properties 🏡', 'Adjust search criteria ⚙️'];
-        }
+      const promptData = this.getPromptForMissingField(missingField, metadata);
+      if (isRentChoice && missingField === 'BHK') {
+        responseText = metadata.discovery.location
+          ? `Got it! Renting gives you fantastic flexibility 👍.\n\nHow many BHK are you looking for in **${metadata.discovery.location}**?`
+          : `Got it! Renting gives you fantastic flexibility 👍.\n\nHow many BHK are you looking for?`;
+      } else if (isBuyChoice && missingField === 'BHK') {
+        responseText = metadata.discovery.location
+          ? `Exciting! Buying a home is a wonderful milestone 🏡.\n\nHow many BHK are you looking for in **${metadata.discovery.location}**?`
+          : `Exciting! Buying a home is a wonderful milestone 🏡.\n\nHow many BHK are you looking for?`;
+      } else {
+        responseText = promptData.message;
       }
-      // 2. Location & BHK provided, only budget is missing
-      else if (hasLocation && hasBHK && !hasBudget) {
-        metadata.state = 'DISCOVERY_BUDGET';
-        if (userIntent === 'rent') {
-          responseText = `Got it! You're looking to rent a **${bhk}** in **${loc}**. What's your approximate monthly budget?`;
-          quickReplies = ['Under ₹25,000/mo', '₹25,000 – ₹40,000/mo', 'Above ₹40,000/mo'];
-        } else {
-          responseText = `Got it! You're looking to buy a **${bhk}** in **${loc}**. What's your approximate budget?`;
-          quickReplies = ['Under ₹1 Crore', '₹1.00 Cr – ₹1.50 Cr', '₹1.50 Cr – ₹2.50 Cr'];
-        }
-      }
-      // 3. BHK provided, location is missing
-      else if (hasBHK && !hasLocation) {
-        metadata.state = 'DISCOVERY_LOCATION';
-        responseText = `Got it, a **${bhk}** 👍. Which area in Ahmedabad are you considering?`;
-        quickReplies = ['Gota', 'Science City / Sola', 'Tragad', 'Ambli / SG Highway', 'Bodakdev'];
-      }
-      // 4. Location provided, BHK is missing
-      else if (hasLocation && !hasBHK) {
-        metadata.state = 'DISCOVERY_HOME_TYPE';
-        responseText = `**${loc}** is a wonderful locality 👍. What configuration are you looking for?`;
-        quickReplies = ['2 BHK', '3 BHK', '4 BHK Sky Villa'];
-      }
-      // 5. Neither location nor BHK known
-      else {
-        metadata.state = 'DISCOVERY_LOCATION';
-        if (userIntent === 'rent') {
-          responseText = `Got it! Renting gives you fantastic flexibility 👍.\n\nWhich area in Ahmedabad are you considering?`;
-        } else {
-          responseText = `Exciting! Buying a home is a wonderful milestone 🏡.\n\nWhich area in Ahmedabad are you considering?`;
-        }
-        quickReplies = ['Gota', 'Science City / Sola', 'Tragad', 'Ambli / SG Highway', 'Bodakdev'];
-      }
+      quickReplies = promptData.quickReplies;
+      metadata.state = promptData.state;
     }
 
     // ──────────────────────────────────────────────────────────────────────────
     // CASE F: EXPLICIT PROPERTY SEARCH (INITIAL OR SUBSEQUENT SEARCH)
     // ──────────────────────────────────────────────────────────────────────────
     else if (intent === 'PROPERTY_SEARCH') {
-      return this.executePropertySearch(params, metadata, project, sessionId, saveUserMessagePromise, false, requestId, startTime);
+      const isGeneralBrowseRequest =
+        /\b(show me verified properties|show verified properties|show properties|all properties|explore all properties|properties available in ahmedabad|properties in ahmedabad)\b/i.test(userText);
+
+      const missingField = this.getMissingDiscoveryField(metadata);
+      if (missingField === 'READY' || isGeneralBrowseRequest) {
+        return this.executePropertySearch(params, metadata, project, sessionId, saveUserMessagePromise, false, requestId, startTime);
+      }
+      const promptData = this.getPromptForMissingField(missingField, metadata);
+      responseText = promptData.message;
+      quickReplies = promptData.quickReplies;
+      metadata.state = promptData.state;
     }
 
     // ──────────────────────────────────────────────────────────────────────────
@@ -969,7 +997,7 @@ Answer this question authoritatively, warmly, and concisely (under 95 words).
   ): Promise<ChatResponsePayload> {
     const { projectId, message } = params;
     const userText = message.trim();
-    const projectName = project?.name || 'BRIM Real Estate Assistant';
+    const projectName = project?.name || 'Prycoons Real Estate Assistant';
     const industry = project?.industry || 'real-estate';
     const websiteUrl = project?.websiteUrl || 'https://prycoons.com/';
 
@@ -1065,11 +1093,11 @@ Answer this question authoritatively, warmly, and concisely (under 95 words).
       }
     }
 
+    const cleanBhk = metadata.discovery.bhk || (metadata.discovery.homeType?.match(/\d\s*BHK/i)?.[0]) || metadata.discovery.homeType || '';
+    const intentTerm = metadata.intent === 'rent' ? 'for rent' : 'for sale';
     const searchQuery = isMoreRequest
-      ? `${locationQuery} ${bhkQuery} residential properties`
-      : userText.toLowerCase().includes(locationQuery.toLowerCase())
-        ? userText
-        : `${userText} in ${locationQuery}`;
+      ? `${locationQuery} ${cleanBhk} residential properties ${intentTerm}`.trim()
+      : `${cleanBhk} properties ${intentTerm} in ${locationQuery}`.trim();
 
     const retrievedChunks = await retrievalService.hybridRetrieve(
       projectId,
@@ -1597,35 +1625,10 @@ Answer this question authoritatively, warmly, and concisely (under 95 words).
 
     // Name Extraction
     if (!metadata.userName) {
-      const nameMatch = text.match(/(?:you can call me|i am|i'm|my name is|this is|call me)\s+([a-zA-Z]+(?:\s+[a-zA-Z]+)?)/i);
-      if (nameMatch && nameMatch[1]) {
-        const candidate = nameMatch[1].trim();
-        const firstWord = candidate.split(/\s+/)[0].toLowerCase();
-        const stopWords = ['looking', 'searching', 'buying', 'renting', 'here', 'interested', 'trying', 'planning', 'just', 'a', 'an', 'the'];
-        if (!stopWords.includes(firstWord)) {
-          const name = candidate.split(/\s+/).map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
-          metadata.userName = name;
-          metadata.lead.name = name;
-        }
-      } else if (
-        metadata.state === 'GREETING' &&
-        text.length < 35 &&
-        !tl.includes('hi') &&
-        !tl.includes('hello') &&
-        !tl.includes('looking') &&
-        !tl.includes('bhk') &&
-        !tl.includes('want') &&
-        !tl.includes('buy') &&
-        !tl.includes('rent') &&
-        !tl.includes('flat') &&
-        !tl.includes('property')
-      ) {
-        const clean = text.replace(/[^a-zA-Z\s]/g, '').trim();
-        if (clean.length > 1) {
-          const name = clean.split(/\s+/).map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
-          metadata.userName = name;
-          metadata.lead.name = name;
-        }
+      const extracted = extractPersonNameFromText(text);
+      if (extracted && isValidPersonName(extracted)) {
+        metadata.userName = extracted;
+        metadata.lead.name = extracted;
       }
     }
 
@@ -1714,21 +1717,32 @@ Answer this question authoritatively, warmly, and concisely (under 95 words).
     }
 
     // BHK Extraction
+    let newBhk: string | null = null;
+    let newHomeType: string | null = null;
     if (/5\s*bhk|5\s*bed/i.test(tl)) {
-      metadata.discovery.bhk = '5 BHK';
-      metadata.discovery.homeType = '5 BHK Palatial Sky Villa';
+      newBhk = '5 BHK';
+      newHomeType = '5 BHK Palatial Sky Villa';
     } else if (/4\s*bhk|4\s*bed/i.test(tl)) {
-      metadata.discovery.bhk = '4 BHK';
-      metadata.discovery.homeType = '4 BHK Sky Villa';
+      newBhk = '4 BHK';
+      newHomeType = '4 BHK Sky Villa';
     } else if (/3\s*bhk|3\s*bed/i.test(tl)) {
-      metadata.discovery.bhk = '3 BHK';
-      metadata.discovery.homeType = '3 BHK Luxury Living';
+      newBhk = '3 BHK';
+      newHomeType = '3 BHK Luxury Living';
     } else if (/2\s*bhk|2\s*bed/i.test(tl)) {
-      metadata.discovery.bhk = '2 BHK';
-      metadata.discovery.homeType = '2 BHK Smart Residence';
+      newBhk = '2 BHK';
+      newHomeType = '2 BHK Smart Residence';
     } else if (/1\s*bhk|1\s*bed/i.test(tl)) {
-      metadata.discovery.bhk = '1 BHK';
-      metadata.discovery.homeType = '1 BHK Compact Apartment';
+      newBhk = '1 BHK';
+      newHomeType = '1 BHK Compact Apartment';
+    }
+
+    if (newBhk) {
+      if (metadata.discovery.bhk !== newBhk) {
+        metadata.discovery.bhk = newBhk;
+        metadata.discovery.homeType = newHomeType || newBhk;
+        metadata.displayedPropertyTitles = [];
+        metadata.displayedProperties = [];
+      }
     }
 
     // Budget & Rent Extraction (Distinguish monthly rent from purchase budget)
@@ -1808,19 +1822,101 @@ Answer this question authoritatively, warmly, and concisely (under 95 words).
       metadata.discovery.mustHave = 'Clubhouse, Gym & Swimming Pool';
     }
 
-    // Intent signals
-    if (/\b(rent|renting|lease|on rent|for rent)\b/i.test(tl)) {
-      metadata.intent = 'rent';
-    } else if (/\b(buy|buying|purchase|invest|looking to buy|want to buy)\b/i.test(tl)) {
-      metadata.intent = 'buy';
-    } else if (!metadata.intent && (tl.includes('bhk') || tl.includes('propert') || tl.includes('flat') || tl.includes('crore') || tl.includes('lakh') || metadata.discovery.location)) {
-      metadata.intent = 'buy';
+    // Intent signals — never default unspecified intent to buy or rent
+    const isComparisonOrQuestion =
+      /\b(should i|difference between|vs|versus|better to|recommend|what does|meaning of)\b/i.test(tl) ||
+      /\b(buy or rent|rent or buy)\b/i.test(tl);
+
+    if (!isComparisonOrQuestion) {
+      if (/\b(currently|now)\s+(want to\s+)?(buy|purchase)\b/i.test(tl)) {
+        metadata.intent = 'buy';
+      } else if (/\b(currently|now)\s+(want to\s+)?(rent|lease)\b/i.test(tl)) {
+        metadata.intent = 'rent';
+      } else if (/\b(looking to buy|want to buy|to buy|buying|buy)\b/i.test(tl) && !/\b(rent|renting)\b/i.test(tl)) {
+        metadata.intent = 'buy';
+      } else if (/\b(looking to rent|want to rent|to rent|renting|rent|lease)\b/i.test(tl) && !/\b(buy|buying)\b/i.test(tl)) {
+        metadata.intent = 'rent';
+      } else if (/\b(looking to buy|want to buy)\b/i.test(tl)) {
+        metadata.intent = 'buy';
+      } else if (/\b(looking to rent|want to rent)\b/i.test(tl)) {
+        metadata.intent = 'rent';
+      }
     }
 
     // Detect explicit search requested
     if (/\b(show me|find me|recommend|options in|search)\b/i.test(tl)) {
       metadata.explicitSearchRequested = true;
     }
+  }
+
+  /**
+   * Determine which discovery criterion is missing next according to the predefined order:
+   * 1. Intent (Buy / Rent)
+   * 2. BHK configuration
+   * 3. Locality in Ahmedabad
+   * Returns 'READY' when all three are present.
+   */
+  public getMissingDiscoveryField(metadata: ChatSessionMetadata): 'INTENT' | 'BHK' | 'LOCATION' | 'READY' {
+    const hasIntent = Boolean(metadata.intent === 'buy' || metadata.intent === 'rent');
+    const hasBHK = Boolean(metadata.discovery.bhk || (metadata.discovery.homeType && /\d\s*bhk/i.test(metadata.discovery.homeType)));
+    const hasLocation = Boolean(metadata.discovery.location && metadata.discovery.location.toLowerCase() !== 'ahmedabad');
+
+    // If both BHK and Location are provided, user has provided specific property criteria to retrieve listings
+    if (hasBHK && hasLocation) return 'READY';
+
+    if (!hasIntent) return 'INTENT';
+    if (!hasBHK) return 'BHK';
+    if (!hasLocation) return 'LOCATION';
+    return 'READY';
+  }
+
+  /**
+   * Generates the prompt and quick replies for the next genuinely missing field
+   */
+  public getPromptForMissingField(field: 'INTENT' | 'BHK' | 'LOCATION', metadata: ChatSessionMetadata): {
+    message: string;
+    quickReplies: string[];
+    state: string;
+  } {
+    const loc = metadata.discovery.location;
+    const bhk = metadata.discovery.bhk || metadata.discovery.homeType;
+
+    if (field === 'INTENT') {
+      let msg = 'Are you looking to buy, rent, or just exploring in Ahmedabad?';
+      if (loc) {
+        msg = `**${loc}** is a wonderful area in Ahmedabad 👍.\n\nAre you looking to buy, rent, or just exploring?`;
+      } else if (bhk) {
+        msg = `Got it, a **${bhk}** 👍.\n\nAre you looking to buy, rent, or just exploring in Ahmedabad?`;
+      }
+      return {
+        message: msg,
+        quickReplies: ['Looking to Buy 🏡', 'Thinking of Renting 🔑', 'Just Exploring ✨'],
+        state: 'INTENT_DETECTION',
+      };
+    }
+
+    if (field === 'BHK') {
+      let msg = 'How many BHK are you looking for?';
+      if (loc) {
+        msg = `How many BHK are you looking for in **${loc}**?`;
+      }
+      return {
+        message: msg,
+        quickReplies: ['2 BHK', '3 BHK', '4 BHK', 'Open to options'],
+        state: 'DISCOVERY_HOME_TYPE',
+      };
+    }
+
+    // field === 'LOCATION'
+    let msg = 'Which locality in Ahmedabad do you prefer?';
+    if (bhk) {
+      msg = `Got it, a **${bhk}** 👍. Which locality in Ahmedabad do you prefer?`;
+    }
+    return {
+      message: msg,
+      quickReplies: ['Gota', 'Science City / Sola', 'Tragad', 'Ambli / SG Highway', 'Bodakdev'],
+      state: 'DISCOVERY_LOCATION',
+    };
   }
 
   /**

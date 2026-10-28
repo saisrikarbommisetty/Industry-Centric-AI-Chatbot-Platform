@@ -80,7 +80,7 @@ export const PRYCOONS_PROJECTS = [
 export const INITIAL_BOTS = [
   {
     id: 'prycoons-ai',
-    name: 'BRIM Real Estate Assistant',
+    name: 'Prycoons Real Estate Assistant',
     avatar: '🏢',
     industryId: 'real-estate',
     industryName: 'Real Estate & Property',
@@ -88,7 +88,7 @@ export const INITIAL_BOTS = [
     status: 'active',
     model: 'BRIM Conversational Model',
     tone: 'Warm, Consultative & Friendly',
-    welcomeMessage: "Hi 👋 Welcome to BRIM Real Estate Assistant! I'm here to help you explore properties and find a home that suits your needs. What should I call you?",
+    welcomeMessage: "Welcome to Prycoons! How can we help with your property search?",
     promptGuidelines: 'Represent Prycoons Real Estate with human warmth and consultative expertise. Ask one natural question at a time. Mix personal lifestyle questions with property criteria, summarize matches, offer WhatsApp shortlist delivery, and connect to advisors.',
     leadCaptureEnabled: true,
     leadCaptureFields: ['name', 'phone', 'email', 'preferredBhk', 'budget'],
@@ -302,7 +302,7 @@ export const INITIAL_CONVERSATIONS = [
   {
     id: 'conv-101',
     botId: 'prycoons-ai',
-    botName: 'BRIM Real Estate Assistant',
+    botName: 'Prycoons Real Estate Assistant',
     userName: 'Vikram Patel',
     userEmail: 'vikram.p@apexcapital.in',
     userPhone: '+91 98250 14890',
@@ -463,7 +463,7 @@ export const INITIAL_CONVERSATIONS = [
   {
     id: 'conv-103',
     botId: 'prycoons-ai',
-    botName: 'BRIM Real Estate Assistant',
+    botName: 'Prycoons Real Estate Assistant',
     userName: 'Rajesh & Suman Gupta',
     userEmail: 'r.gupta@dubaiholding.ae',
     userPhone: '+971 50 891 2345',

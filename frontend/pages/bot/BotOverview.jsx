@@ -293,27 +293,42 @@ export const BotOverview = () => {
                   <div key={msg.id} className={`message-row ${msg.sender}`}>
                     <div className="message-bubble" style={{ fontSize: '0.825rem', padding: '0.65rem 0.85rem' }}>
                       <div style={{ whiteSpace: 'pre-line' }}>{msg.text}</div>
+                      {msg.sender === 'bot' && msg.quickReplies && msg.quickReplies.length > 0 && (
+                        <div className="chat-chips-group" role="radiogroup" aria-label="Predefined options" style={{ marginTop: '0.5rem', paddingTop: '0.4rem' }}>
+                          {msg.quickReplies.map((q, optIdx) => (
+                            <button
+                              key={optIdx}
+                              type="button"
+                              role="radio"
+                              className="selection-chip"
+                              onClick={() => handleSend(q)}
+                            >
+                              <span className="chip-radio-circle" aria-hidden="true" />
+                              <span className="chip-label">{q}</span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   </div>
                 ))}
               </div>
 
               {/* Quick Prompt Pills */}
-              <div className="suggestion-pills-bar" style={{ padding: '0.35rem 0.75rem' }}>
-                {((messages[messages.length - 1]?.quickReplies && messages[messages.length - 1].quickReplies.length > 0)
-                  ? messages[messages.length - 1].quickReplies
-                  : (currentBot?.suggestedQuestions || ['Looking to Buy 🏡', 'Thinking of Renting 🔑', 'Just Browsing ✨'])
-                ).slice(0, 3).map((q, idx) => (
-                  <button 
-                    key={idx}
-                    type="button"
-                    className="suggestion-pill"
-                    onClick={() => handleSend(q)}
-                  >
-                    {q}
-                  </button>
-                ))}
-              </div>
+              {(!messages[messages.length - 1]?.quickReplies || messages[messages.length - 1].quickReplies.length === 0) && (
+                <div className="suggestion-pills-bar" style={{ padding: '0.35rem 0.75rem' }}>
+                  {(currentBot?.suggestedQuestions || ['Looking to Buy 🏡', 'Thinking of Renting 🔑', 'Just Browsing ✨']).slice(0, 3).map((q, idx) => (
+                    <button 
+                      key={idx}
+                      type="button"
+                      className="suggestion-pill"
+                      onClick={() => handleSend(q)}
+                    >
+                      {q}
+                    </button>
+                  ))}
+                </div>
+              )}
 
               {/* Input Form */}
               <form 

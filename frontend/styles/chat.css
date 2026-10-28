@@ -256,6 +256,152 @@
   border: 1px solid var(--border-subtle);
 }
 
+/* Interactive Predefined Selection Chips (Radio-Button Style) */
+.chat-chips-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin-top: 0.65rem;
+  margin-bottom: 0.25rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--border-subtle);
+  animation: fadeIn 0.2s ease-out;
+}
+
+.selection-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.38rem 0.8rem;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--border-default);
+  background-color: #FFFFFF;
+  color: var(--text-primary);
+  font-size: 0.79rem;
+  font-weight: 500;
+  font-family: inherit;
+  line-height: 1.25;
+  cursor: pointer;
+  transition: background-color 0.16s ease, border-color 0.16s ease, color 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease;
+  user-select: none;
+  text-align: left;
+  outline: none;
+  box-shadow: 0 1px 2px rgba(37, 34, 31, 0.04);
+  min-height: 32px;
+}
+
+.selection-chip:hover:not(:disabled):not(.locked) {
+  border-color: var(--primary);
+  background-color: var(--primary-subtle);
+  color: var(--text-primary);
+  transform: translateY(-1px);
+  box-shadow: 0 2px 5px rgba(200, 92, 74, 0.1);
+}
+
+.selection-chip:focus-visible {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px var(--primary-subtle);
+}
+
+/* Radio circle indicator */
+.chip-radio-circle {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 1.5px solid var(--border-strong);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  background-color: #FFFFFF;
+  transition: border-color 0.16s ease, background-color 0.16s ease;
+}
+
+.selection-chip:hover:not(:disabled):not(.locked) .chip-radio-circle {
+  border-color: var(--primary);
+}
+
+/* Selected state */
+.selection-chip.selected {
+  border-color: var(--primary);
+  background-color: var(--primary-subtle);
+  color: var(--text-primary);
+  font-weight: 600;
+  box-shadow: 0 1px 3px rgba(200, 92, 74, 0.12);
+}
+
+.selection-chip.selected .chip-radio-circle {
+  border-color: var(--primary);
+  background-color: #FFFFFF;
+}
+
+.chip-radio-dot {
+  width: 6.5px;
+  height: 6.5px;
+  border-radius: 50%;
+  background-color: var(--primary);
+  display: block;
+}
+
+/* Checkbox indicator (for multi-select if supported) */
+.chip-checkbox-box {
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  border: 1.5px solid var(--border-strong);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  background-color: #FFFFFF;
+  transition: all 0.16s ease;
+}
+
+.selection-chip.selected .chip-checkbox-box {
+  border-color: var(--primary);
+  background-color: var(--primary);
+  color: #FFFFFF;
+}
+
+/* Disabled & Locked states */
+.selection-chip:disabled,
+.selection-chip.locked {
+  cursor: default;
+  transform: none !important;
+}
+
+/* Unselected options after submission: gently muted */
+.selection-chip.locked:not(.selected) {
+  opacity: 0.52;
+  background-color: rgba(247, 243, 236, 0.45);
+  border-color: var(--border-subtle);
+  box-shadow: none;
+}
+
+/* Selected option after submission: remains highlighted and clearly selected */
+.selection-chip.locked.selected {
+  opacity: 1;
+  border-color: var(--primary);
+  background-color: var(--primary-subtle);
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgba(200, 92, 74, 0.08);
+}
+
+.chip-label {
+  display: inline-block;
+  vertical-align: middle;
+}
+
+@media (max-width: 480px) {
+  .chat-chips-group {
+    gap: 0.35rem;
+  }
+  .selection-chip {
+    font-size: 0.775rem;
+    padding: 0.35rem 0.7rem;
+  }
+}
+
 /* Suggestion Pills Bar */
 .suggestion-pills-bar {
   display: flex;

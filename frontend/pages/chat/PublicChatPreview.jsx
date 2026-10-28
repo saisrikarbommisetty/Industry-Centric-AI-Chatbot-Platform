@@ -15,7 +15,7 @@ import {
   MicOff
 } from 'lucide-react';
 import { usePlatform } from '../../context/PlatformContext';
-import { createInitialSession, getInactivityFollowUp } from '../../utils/conversationEngine';
+import { createInitialSession, getInactivityFollowUp, getWelcomeMessageForSession } from '../../utils/conversationEngine';
 import { api } from '../../utils/api';
 import { OFFICIAL_PRYCOONS_CONTACT } from '../../utils/organization';
 
@@ -125,6 +125,8 @@ export const PublicChatPreview = () => {
   const [isTyping, setIsTyping] = useState(false);
   const [requestingLocation, setRequestingLocation] = useState(false);
   const [imgErrors, setImgErrors] = useState({});
+  const [selectedOptions, setSelectedOptions] = useState({});
+  const submittingMsgIdRef = useRef(null);
 
   // Web Speech API Voice Recognition State
   const [isListening, setIsListening] = useState(false);
@@ -241,17 +243,28 @@ export const PublicChatPreview = () => {
         try {
           const res = await api.chat.getMessages(savedSessionId);
           if (!isCancelled && res?.success && Array.isArray(res.data) && res.data.length > 0) {
-            const formatted = res.data.map((m) => ({
-              id: m.id,
-              sender: m.role === 'USER' ? 'user' : 'bot',
-              text: m.content,
-              time: new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-              propertyCard: m.metadata?.propertyCard || null,
-              propertyCards: m.metadata?.propertyCards || (m.metadata?.propertyCard ? [m.metadata.propertyCard] : []),
-              sources: m.metadata?.sources || [],
-              sourceCitation: m.metadata?.sources?.[0]?.title || null,
-              quickReplies: m.metadata?.quickReplies || [],
-            }));
+            const formatted = res.data.map((m, idx, arr) => {
+              const isBot = m.role !== 'USER';
+              const qr = m.metadata?.quickReplies || [];
+              let selected = m.metadata?.selectedReply;
+              if (!selected && isBot && arr[idx + 1] && arr[idx + 1].role === 'USER') {
+                const nextUserText = arr[idx + 1].content?.trim().toLowerCase();
+                const matched = qr.find((q) => q.trim().toLowerCase() === nextUserText);
+                if (matched) selected = matched;
+              }
+              return {
+                id: m.id,
+                sender: isBot ? 'bot' : 'user',
+                text: m.content,
+                time: new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                propertyCard: m.metadata?.propertyCard || null,
+                propertyCards: m.metadata?.propertyCards || (m.metadata?.propertyCard ? [m.metadata.propertyCard] : []),
+                sources: m.metadata?.sources || [],
+                sourceCitation: m.metadata?.sources?.[0]?.title || null,
+                quickReplies: qr,
+                selectedReply: selected,
+              };
+            });
 
             setMessages(formatted);
             sessionRef.current = {
@@ -265,13 +278,30 @@ export const PublicChatPreview = () => {
         } catch (e) {
           console.warn('Could not restore session messages, initializing fresh session:', e);
         }
+
+        // If savedSessionId exists but no messages in database yet (e.g. refreshed right after opening):
+        // Restore the SAME session with the consistent welcome message selected for this session ID
+        const welcomeKey = `prycoons_welcome_${currentBot?.id}_${savedSessionId}`;
+        const savedWelcomeText = localStorage.getItem(welcomeKey) || getWelcomeMessageForSession(savedSessionId);
+        const restoredSession = createInitialSession(currentBot, savedSessionId);
+        restoredSession.welcomeMessage = savedWelcomeText;
+        restoredSession.initialMessage.text = savedWelcomeText;
+        restoredSession.botId = currentBot?.id;
+        sessionRef.current = restoredSession;
+
+        if (!isCancelled) {
+          setMessages([restoredSession.initialMessage]);
+        }
+        return;
       }
 
-      // If no stored history in database, initialize fresh session
+      // If genuinely fresh session (no savedSessionId):
       const freshSession = createInitialSession(currentBot);
       freshSession.botId = currentBot?.id;
       sessionRef.current = freshSession;
-      localStorage.setItem(sessionKey, freshSession.id || freshSession.sessionId);
+      const newSessionId = freshSession.id || freshSession.sessionId;
+      localStorage.setItem(sessionKey, newSessionId);
+      localStorage.setItem(`prycoons_welcome_${currentBot?.id}_${newSessionId}`, freshSession.welcomeMessage || freshSession.initialMessage.text);
       if (!isCancelled) {
         setMessages([freshSession.initialMessage]);
       }
@@ -497,6 +527,39 @@ export const PublicChatPreview = () => {
     }
   };
 
+  const handleOptionSelect = (msgId, optionText) => {
+    // Prevent duplicate submissions on rapid repeated clicks or when busy
+    if (isTyping || submittingMsgIdRef.current) return;
+
+    // Check if this option group is already submitted or locked
+    const currentMsg = messages.find((m) => m.id === msgId);
+    if (selectedOptions[msgId] || currentMsg?.selectedReply) return;
+
+    // Provide immediate visual feedback showing which option is selected
+    setSelectedOptions((prev) => ({ ...prev, [msgId]: optionText }));
+    submittingMsgIdRef.current = msgId;
+
+    // Persist selected option on the message in state
+    setMessages((prev) =>
+      prev.map((m) => (m.id === msgId ? { ...m, selectedReply: optionText } : m))
+    );
+
+    // If brochure download requested, trigger brochure download
+    const qLow = optionText.toLowerCase().trim();
+    if (
+      (qLow.includes('download') && qLow.includes('brochure')) ||
+      qLow === 'download brochure' ||
+      qLow === 'download brochure 📥' ||
+      qLow === 'brochure'
+    ) {
+      const lastCard = messages.flatMap((m) => m.propertyCards || []).slice(-1)[0] || (messages.find((m) => m.propertyCard)?.propertyCard);
+      handleDownloadBrochure(lastCard);
+    }
+
+    // Submit selected answer through existing message pipeline
+    handleSendMessage(optionText);
+  };
+
   const handleSendMessage = (textToSend, customClientContext = null) => {
     const query = textToSend || input;
     if (!query.trim()) return;
@@ -571,8 +634,21 @@ export const PublicChatPreview = () => {
         }
       } catch (err) {
         console.warn('Chat send error:', err);
+        // Restore interactive state if submission fails
+        if (submittingMsgIdRef.current) {
+          const failedId = submittingMsgIdRef.current;
+          setSelectedOptions((prev) => {
+            const next = { ...prev };
+            delete next[failedId];
+            return next;
+          });
+          setMessages((prev) =>
+            prev.map((m) => (m.id === failedId ? { ...m, selectedReply: undefined } : m))
+          );
+        }
       } finally {
         setIsTyping(false);
+        submittingMsgIdRef.current = null;
       }
     })();
   };
@@ -671,21 +747,30 @@ export const PublicChatPreview = () => {
       inactivityTimerRef.current = null;
     }
     const sessionKey = `brim_chat_session_${currentBot?.id}`;
+    const oldSessionId = localStorage.getItem(sessionKey);
+    if (oldSessionId) {
+      localStorage.removeItem(`prycoons_welcome_${currentBot?.id}_${oldSessionId}`);
+    }
     localStorage.removeItem(sessionKey);
 
     const freshSession = createInitialSession(currentBot);
     freshSession.botId = currentBot?.id;
     sessionRef.current = freshSession;
-    localStorage.setItem(sessionKey, freshSession.id || freshSession.sessionId);
+    const newSessionId = freshSession.id || freshSession.sessionId;
+    localStorage.setItem(sessionKey, newSessionId);
+    localStorage.setItem(`prycoons_welcome_${currentBot?.id}_${newSessionId}`, freshSession.welcomeMessage || freshSession.initialMessage.text);
 
     setMessages([freshSession.initialMessage]);
     setActiveLeadForm(false);
+    setSelectedOptions({});
+    submittingMsgIdRef.current = null;
     inactivityFiredForMsgIdRef.current = null;
     addToast('Conversation restarted', 'info');
   };
 
   // Get current active quick replies from the latest bot message
   const lastBotMessage = [...messages].reverse().find((m) => m.sender === 'bot');
+  const lastBotMessageId = lastBotMessage?.id;
   const activeQuickReplies = (lastBotMessage?.quickReplies && lastBotMessage.quickReplies.length > 0)
     ? lastBotMessage.quickReplies
     : (currentBot?.suggestedQuestions || ['Looking to Buy 🏡', 'Thinking of Renting 🔑', 'Just Browsing ✨']);
@@ -725,7 +810,7 @@ export const PublicChatPreview = () => {
               <div className="online-indicator" />
             </div>
             <div className="chat-title-group">
-              <div className="chat-title">{currentBot?.name || 'BRIM Assistant'}</div>
+              <div className="chat-title">{currentBot?.name || 'Prycoons Assistant'}</div>
               <div className="chat-subtitle">{currentBot?.industryName || 'Prycoons Real Estate'} • Online</div>
             </div>
           </div>
@@ -750,6 +835,46 @@ export const PublicChatPreview = () => {
                 <div className="message-text-content">
                   {renderFormattedMessage(msg.text, handleDownloadBrochure)}
                 </div>
+
+                {/* Predefined Interactive Selection Chips (Radio-Button Style) */}
+                {msg.sender === 'bot' && msg.quickReplies && msg.quickReplies.length > 0 && (
+                  <div 
+                    className="chat-chips-group" 
+                    role="radiogroup" 
+                    aria-label="Predefined options"
+                  >
+                    {msg.quickReplies.map((q, optIdx) => {
+                      const isSelected = (msg.selectedReply === q) || (selectedOptions[msg.id] === q);
+                      const isLocked = isTyping || (submittingMsgIdRef.current !== null) || (msg.selectedReply !== undefined) || (selectedOptions[msg.id] !== undefined) || (msg.id !== lastBotMessageId);
+
+                      return (
+                        <button
+                          key={`${msg.id}-opt-${optIdx}`}
+                          type="button"
+                          role="radio"
+                          aria-checked={isSelected}
+                          tabIndex={isLocked ? -1 : 0}
+                          className={`selection-chip ${isSelected ? 'selected' : ''} ${isLocked ? 'locked' : ''}`}
+                          disabled={isLocked}
+                          onClick={() => handleOptionSelect(msg.id, q)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                              e.preventDefault();
+                              if (!isLocked) {
+                                handleOptionSelect(msg.id, q);
+                              }
+                            }
+                          }}
+                        >
+                          <span className="chip-radio-circle" aria-hidden="true">
+                            {isSelected && <span className="chip-radio-dot" />}
+                          </span>
+                          <span className="chip-label">{q}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
 
                 {/* Multi-Property Cards Demonstration: Display 5-8 relevant properties */}
                 {(() => {
@@ -961,38 +1086,41 @@ export const PublicChatPreview = () => {
         )}
 
         {/* Suggestion Pills Bar */}
-        <div className="suggestion-pills-bar">
-          {/* Natural location sharing button if location not yet determined */}
-          {!sessionRef.current?.userLocation && !sessionRef.current?.locationDenied && (
-            <button
-              type="button"
-              className="suggestion-pill location-pill"
-              onClick={handleShareLocation}
-              disabled={requestingLocation}
-              style={{ backgroundColor: 'var(--primary-subtle)', borderColor: 'var(--primary)', color: 'var(--primary)' }}
-            >
-              <MapPin size={12} />
-              <span>{requestingLocation ? 'Detecting...' : 'Share My Location'}</span>
-            </button>
-          )}
+        {((!sessionRef.current?.userLocation && !sessionRef.current?.locationDenied) || (!lastBotMessage?.quickReplies || lastBotMessage.quickReplies.length === 0)) && (
+          <div className="suggestion-pills-bar">
+            {/* Natural location sharing button if location not yet determined */}
+            {!sessionRef.current?.userLocation && !sessionRef.current?.locationDenied && (
+              <button
+                type="button"
+                className="suggestion-pill location-pill"
+                onClick={handleShareLocation}
+                disabled={requestingLocation}
+                style={{ backgroundColor: 'var(--primary-subtle)', borderColor: 'var(--primary)', color: 'var(--primary)' }}
+              >
+                <MapPin size={12} />
+                <span>{requestingLocation ? 'Detecting...' : 'Share My Location'}</span>
+              </button>
+            )}
 
-          {activeQuickReplies.map((q, idx) => (
-            <button
-              key={idx}
-              type="button"
-              className="suggestion-pill"
-              onClick={() => {
-                if (q.toLowerCase().includes('download') && q.toLowerCase().includes('brochure')) {
-                  const lastCard = messages.flatMap((m) => m.propertyCards || []).slice(-1)[0] || (messages.find((m) => m.propertyCard)?.propertyCard);
-                  handleDownloadBrochure(lastCard);
-                }
-                handleSendMessage(q);
-              }}
-            >
-              {q}
-            </button>
-          ))}
-        </div>
+            {(!lastBotMessage?.quickReplies || lastBotMessage.quickReplies.length === 0) && activeQuickReplies.map((q, idx) => (
+              <button
+                key={idx}
+                type="button"
+                className="suggestion-pill"
+                disabled={isTyping}
+                onClick={() => {
+                  if (q.toLowerCase().includes('download') && q.toLowerCase().includes('brochure')) {
+                    const lastCard = messages.flatMap((m) => m.propertyCards || []).slice(-1)[0] || (messages.find((m) => m.propertyCard)?.propertyCard);
+                    handleDownloadBrochure(lastCard);
+                  }
+                  handleSendMessage(q);
+                }}
+              >
+                {q}
+              </button>
+            ))}
+          </div>
+        )}
 
         {/* Input Bar */}
         <div className="chat-input-area">

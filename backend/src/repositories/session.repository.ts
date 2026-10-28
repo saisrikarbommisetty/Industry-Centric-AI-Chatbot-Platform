@@ -1,6 +1,7 @@
 import { prisma, isDatabaseConnected } from '../config/database';
 import { ChatSessionMetadata } from '../types';
 import { logger } from '../utils/logger';
+import { getWelcomeMessageForSession } from '../config/greetings';
 
 const memorySessions: Map<string, any> = new Map();
 
@@ -14,6 +15,7 @@ export class SessionRepository {
     sessionMetadata?: ChatSessionMetadata | Record<string, any>;
   }): Promise<any> {
     const id = data.id || `sess-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+    const welcome = getWelcomeMessageForSession(id);
     const sessionRecord = {
       id,
       projectId: data.projectId,
@@ -24,6 +26,7 @@ export class SessionRepository {
       sessionMetadata: data.sessionMetadata || {
         state: 'GREETING',
         stepIndex: 0,
+        welcomeMessage: welcome,
         discovery: {},
         lead: {},
       },

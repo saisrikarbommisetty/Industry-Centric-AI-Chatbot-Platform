@@ -37,7 +37,7 @@ export const BotNav = () => {
 
           <div className="bot-meta">
             <div className="bot-meta-title">
-              {currentBot?.name || 'BRIM Assistant'}
+              {currentBot?.name || 'Prycoons Assistant'}
               <span className={`status-dot ${currentBot?.status === 'active' ? 'active' : 'idle'}`} title={`Status: ${currentBot?.status}`} />
             </div>
             <div className="bot-meta-sub">
