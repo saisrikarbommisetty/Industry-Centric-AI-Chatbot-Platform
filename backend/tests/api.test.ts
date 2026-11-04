@@ -30,9 +30,9 @@ async function runApiTests() {
 
   // Start temporary test server
   const server = http.createServer(app);
-  await new Promise<void>((resolve) => server.listen(0, resolve));
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   const port = (server.address() as any).port;
-  const baseUrl = `http://localhost:${port}`;
+  const baseUrl = `http://127.0.0.1:${port}`;
 
   try {
     // 1. Health Check

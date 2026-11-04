@@ -1,6 +1,14 @@
 import { projectRepository } from '../../repositories/project.repository';
 import { sessionRepository } from '../../repositories/session.repository';
 import { messageRepository } from '../../repositories/message.repository';
+import { leadRepository } from '../../repositories/lead.repository';
+import { knowledgeRepository } from '../../repositories/knowledge.repository';
+import {
+  validateIndianMobile,
+  extractIndianMobileFromText,
+  isInvalidPhoneAttempt,
+  isDecliningResponse,
+} from '../../utils/phone';
 import { retrievalService } from '../rag/retrieval.service';
 import { propertyMatcherService, normalizeLocality } from '../rag/propertyMatcher.service';
 import { openaiService } from '../ai/openai.service';
@@ -184,6 +192,64 @@ export class ConversationService {
       };
     }
 
+    // Check if user is declining to share name or contact details
+    if (isDecliningResponse(userText)) {
+      metadata.lead.phoneDeclined = true;
+      metadata.lead.awaitingPhone = false;
+      metadata.lead.nameDeclined = true;
+      metadata.lead.awaitingName = false;
+
+      let declineAck: string;
+      let quickReplies: string[];
+
+      // If user declined right at the initial greeting or before specifying intent/properties
+      if (
+        metadata.state === 'GREETING' ||
+        (!metadata.intent &&
+          !metadata.discovery.location &&
+          !metadata.discovery.bhk &&
+          (!metadata.displayedProperties || metadata.displayedProperties.length === 0))
+      ) {
+        metadata.state = 'INTENT_DETECTION';
+        declineAck = 'No problem at all! Are you looking to buy, rent, or just exploring in Ahmedabad?';
+        quickReplies = ['Looking to Buy 🏡', 'Thinking of Renting 🔑', 'Just Exploring ✨'];
+      } else {
+        declineAck = 'No problem at all! We completely respect your privacy. Feel free to explore properties or ask any questions about real estate in Ahmedabad.';
+        quickReplies = ['Show properties in Science City', 'Looking to Buy', 'Explore Ahmedabad'];
+      }
+
+      await saveUserMessagePromise;
+      metadata.stepIndex += 1;
+
+      await Promise.all([
+        messageRepository.createMessage({
+          sessionId,
+          role: 'ASSISTANT',
+          content: declineAck,
+          metadata: { sources: [], propertyCard: null, propertyCards: [] },
+        }),
+        sessionRepository.updateSession(sessionId, {
+          userName: metadata.userName,
+          intent: metadata.intent,
+          location: metadata.discovery.location,
+          sessionMetadata: metadata,
+        }),
+      ]);
+
+      return {
+        sessionId,
+        message: declineAck,
+        context: metadata,
+        sources: [],
+        suggestions: quickReplies,
+        quickReplies,
+        propertyCard: null,
+        propertyCards: [],
+        leadCaptureRequired: false,
+        advisorConnected: false,
+      };
+    }
+
     // Authoritative Official Contact Information Check (Feature 3)
     const isEmailQuestion = /(?:what\s+(?:is|are)|what's|give\s+me|share|know|tell\s+me).*(?:email|mail|e-mail)/i.test(userText) ||
                            /^(?:prycoons?\s+)?(?:email|mail|e-mail)(?:\s+address|\s+id)?\??$/i.test(userText) ||
@@ -343,6 +409,202 @@ export class ConversationService {
     const isExplicitNameIntroduction =
       /(?:call me|my name is|i am|this is)\s+[a-zA-Z]+/i.test(userText.trim()) ||
       (isValidPersonName(userText.trim()) && metadata.state === 'GREETING');
+
+    // 2. Check if user shared phone number (or combo name + phone)
+    const extractedMobile = extractIndianMobileFromText(userText);
+    if (extractedMobile) {
+      metadata.lead.phone = extractedMobile.normalized;
+      metadata.lead.captured = true;
+      metadata.lead.awaitingPhone = false;
+
+      if (candidateName && !metadata.userName) {
+        const formatted = formatPersonName(candidateName);
+        metadata.userName = formatted;
+        metadata.lead.name = formatted;
+        metadata.lead.awaitingName = false;
+      }
+
+      await leadRepository.upsertLead({
+        projectId,
+        sessionId,
+        name: metadata.userName || metadata.lead.name || 'Website Visitor',
+        phone: metadata.lead.phone,
+        intent: metadata.intent || 'buy',
+        status: 'Qualified Lead',
+        preferences: {
+          ...metadata.discovery,
+          locality: metadata.discovery.location,
+          location: metadata.discovery.location,
+          bhk: metadata.discovery.bhk || metadata.discovery.homeType,
+          buyOrRent: metadata.intent || 'buy',
+          buyRent: metadata.intent || 'buy',
+          budget: metadata.discovery.budget,
+          budgetNum: metadata.discovery.budgetNum,
+        },
+      });
+
+      const phoneAck = `Thank you${metadata.userName ? `, ${metadata.userName}` : ''}! I’ve noted your contact number (${extractedMobile.normalized}). Our property advisor will reach out with the curated options and project details. Feel free to ask any other questions about properties in Ahmedabad!`;
+      const quickReplies = ['Show more options ➕', 'Download brochure 📥', 'Explore Ahmedabad 🏡'];
+
+      await saveUserMessagePromise;
+      metadata.stepIndex += 1;
+      await Promise.all([
+        messageRepository.createMessage({
+          sessionId,
+          role: 'ASSISTANT',
+          content: phoneAck,
+          metadata: { sources: [], propertyCard: null, propertyCards: [] },
+        }),
+        sessionRepository.updateSession(sessionId, {
+          userName: metadata.userName,
+          intent: metadata.intent,
+          location: metadata.discovery.location,
+          sessionMetadata: metadata,
+        }),
+      ]);
+
+      return {
+        sessionId,
+        message: phoneAck,
+        context: metadata,
+        sources: [],
+        suggestions: quickReplies,
+        quickReplies,
+        propertyCard: null,
+        propertyCards: [],
+        leadCaptureRequired: true,
+        advisorConnected: true,
+      };
+    }
+
+    // 2.5 Invalid phone attempt check
+    if (metadata.lead.awaitingPhone && isInvalidPhoneAttempt(userText) && !hasPropertySearchWords) {
+      const invalidPhoneMsg = 'Could you please provide a valid 10-digit mobile number (e.g., +91 98250 12345)?';
+      const quickReplies = ['+91 98250 12345', 'Prefer not to share', 'Explore properties 🏡'];
+
+      await saveUserMessagePromise;
+      metadata.stepIndex += 1;
+      await Promise.all([
+        messageRepository.createMessage({
+          sessionId,
+          role: 'ASSISTANT',
+          content: invalidPhoneMsg,
+          metadata: { sources: [], propertyCard: null, propertyCards: [] },
+        }),
+        sessionRepository.updateSession(sessionId, {
+          userName: metadata.userName,
+          intent: metadata.intent,
+          location: metadata.discovery.location,
+          sessionMetadata: metadata,
+        }),
+      ]);
+
+      return {
+        sessionId,
+        message: invalidPhoneMsg,
+        context: metadata,
+        sources: [],
+        suggestions: quickReplies,
+        quickReplies,
+        propertyCard: null,
+        propertyCards: [],
+        leadCaptureRequired: false,
+        advisorConnected: false,
+      };
+    }
+
+    // 3. Check if user provided their name (without searching for properties in the same message)
+    if (
+      candidateName &&
+      !hasPropertySearchWords &&
+      (metadata.lead.awaitingName ||
+        metadata.lead.nameAsked ||
+        isExplicitNameIntroduction ||
+        metadata.state === 'GREETING' ||
+        isAnsweringGreeting)
+    ) {
+      const formatted = formatPersonName(candidateName);
+      metadata.userName = formatted;
+      metadata.lead.name = formatted;
+      metadata.lead.awaitingName = false;
+
+      // Always persist name to backend lead repository
+      await leadRepository.upsertLead({
+        projectId,
+        sessionId,
+        name: metadata.userName,
+        intent: metadata.intent || 'buy',
+        preferences: {
+          ...metadata.discovery,
+          locality: metadata.discovery.location,
+          location: metadata.discovery.location,
+          bhk: metadata.discovery.bhk || metadata.discovery.homeType,
+          buyOrRent: metadata.intent || 'buy',
+          buyRent: metadata.intent || 'buy',
+          budget: metadata.discovery.budget,
+          budgetNum: metadata.discovery.budgetNum,
+        },
+      });
+
+      let nameReplyMsg = '';
+      let quickReplies: string[] = [];
+
+      if (metadata.lead.awaitingName || metadata.lead.nameAsked) {
+        nameReplyMsg = `Nice to meet you, ${metadata.userName}! 👋 Could you also share your contact number so our property team can send you the brochures and updates directly on WhatsApp or phone?`;
+        quickReplies = ['+91 98250 12345', 'Prefer not to share', 'Explore more properties 🏡'];
+        metadata.lead.awaitingPhone = true;
+        metadata.lead.phoneAsked = true;
+      } else {
+        const missingField = this.getMissingDiscoveryField(metadata);
+        if (missingField === 'BHK') {
+          nameReplyMsg = metadata.discovery.location
+            ? `Nice to meet you, ${metadata.userName}! 👋\n\nHow many BHK are you looking for in **${metadata.discovery.location}**?`
+            : `Nice to meet you, ${metadata.userName}! 👋\n\nHow many BHK are you looking for?`;
+          quickReplies = ['2 BHK', '3 BHK', '4 BHK', 'Open to options'];
+          metadata.state = 'DISCOVERY_BHK';
+        } else if (missingField === 'LOCATION') {
+          nameReplyMsg = `Nice to meet you, ${metadata.userName}! 👋\n\nWhich locality in Ahmedabad do you prefer?`;
+          quickReplies = ['Gota', 'Science City / Sola', 'Tragad', 'Ambli / SG Highway', 'Bodakdev'];
+          metadata.state = 'DISCOVERY_LOCATION';
+        } else if (missingField === 'READY') {
+          return this.executePropertySearch(params, metadata, project, sessionId, saveUserMessagePromise, false, requestId, startTime);
+        } else {
+          nameReplyMsg = `Nice to meet you, ${metadata.userName}! 👋 Are you looking to buy, rent, or just exploring in Ahmedabad?`;
+          quickReplies = ['Looking to Buy 🏡', 'Thinking of Renting 🔑', 'Just Exploring ✨'];
+          metadata.state = 'INTENT_DETECTION';
+        }
+      }
+
+      await saveUserMessagePromise;
+      metadata.stepIndex += 1;
+      await Promise.all([
+        messageRepository.createMessage({
+          sessionId,
+          role: 'ASSISTANT',
+          content: nameReplyMsg,
+          metadata: { sources: [], propertyCard: null, propertyCards: [] },
+        }),
+        sessionRepository.updateSession(sessionId, {
+          userName: metadata.userName,
+          intent: metadata.intent,
+          location: metadata.discovery.location,
+          sessionMetadata: metadata,
+        }),
+      ]);
+
+      return {
+        sessionId,
+        message: nameReplyMsg,
+        context: metadata,
+        sources: [],
+        suggestions: quickReplies,
+        quickReplies,
+        propertyCard: null,
+        propertyCards: [],
+        leadCaptureRequired: false,
+        advisorConnected: false,
+      };
+    }
 
     if (isExplicitNameIntroduction && metadata.state !== 'GREETING' && !hasPropertySearchWords) {
       if (candidateName) {
@@ -1026,70 +1288,78 @@ Answer this question authoritatively, warmly, and concisely (under 95 words).
     // Dynamic Locality Discovery & Real-Time Ingestion:
     // If user requested a specific locality in Ahmedabad, ensure it is discovered from Prycoons
     if (targetLoc && targetLoc.toLowerCase() !== 'ahmedabad') {
-      const discoveryResult = await localityDiscoveryService.discoverAndIndexLocality(targetLoc, projectId);
+      const existingChunks = await knowledgeRepository.getAllChunks(projectId);
+      const hasLocalityChunks = existingChunks.some((c) =>
+        (c.content || '').toLowerCase().includes(targetLoc.toLowerCase()) ||
+        (c.sourceTitle || '').toLowerCase().includes(targetLoc.toLowerCase())
+      );
 
-      if (discoveryResult.status === 'NETWORK_ERROR') {
-        const networkMsg = "I'm having trouble connecting to the property listings right now. Please check your connection and try again in a moment.";
-        const quickReplies = ['Try again 🔄', 'Explore other localities', 'Talk to advisor 📞'];
-        await saveUserMessagePromise;
-        metadata.stepIndex += 1;
-        await Promise.all([
-          messageRepository.createMessage({
-            sessionId,
-            role: 'ASSISTANT',
-            content: networkMsg,
-            metadata: { sources: [], propertyCard: null, propertyCards: [] },
-          }),
-          sessionRepository.updateSession(sessionId, {
-            userName: metadata.userName,
-            intent: metadata.intent,
-            location: metadata.discovery.location,
-            sessionMetadata: metadata,
-          }),
-        ]);
-        return {
-          sessionId,
-          message: networkMsg,
-          context: metadata,
-          sources: [],
-          suggestions: quickReplies,
-          propertyCard: null,
-          propertyCards: [],
-          leadCaptureRequired: false,
-          advisorConnected: false,
-        };
-      }
+      if (!hasLocalityChunks) {
+        const discoveryResult = await localityDiscoveryService.discoverAndIndexLocality(targetLoc, projectId);
 
-      if (discoveryResult.status === 'NOT_FOUND' || discoveryResult.status === 'EMPTY_PAGE') {
-        const noResultsMsg = `I couldn’t find any matching properties in **${targetLoc}** on Prycoons right now. Would you like me to check another Ahmedabad area, such as Gota, Bodakdev, or Thaltej?`;
-        const quickReplies = ['Explore Gota 🏡', 'Explore Bodakdev', 'Explore Thaltej'];
-        await saveUserMessagePromise;
-        metadata.stepIndex += 1;
-        await Promise.all([
-          messageRepository.createMessage({
+        if (discoveryResult.status === 'NETWORK_ERROR' && existingChunks.length === 0) {
+          const networkMsg = "I'm having trouble connecting to the property listings right now. Please check your connection and try again in a moment.";
+          const quickReplies = ['Try again 🔄', 'Explore other localities', 'Talk to advisor 📞'];
+          await saveUserMessagePromise;
+          metadata.stepIndex += 1;
+          await Promise.all([
+            messageRepository.createMessage({
+              sessionId,
+              role: 'ASSISTANT',
+              content: networkMsg,
+              metadata: { sources: [], propertyCard: null, propertyCards: [] },
+            }),
+            sessionRepository.updateSession(sessionId, {
+              userName: metadata.userName,
+              intent: metadata.intent,
+              location: metadata.discovery.location,
+              sessionMetadata: metadata,
+            }),
+          ]);
+          return {
             sessionId,
-            role: 'ASSISTANT',
-            content: noResultsMsg,
-            metadata: { sources: [], propertyCard: null, propertyCards: [] },
-          }),
-          sessionRepository.updateSession(sessionId, {
-            userName: metadata.userName,
-            intent: metadata.intent,
-            location: metadata.discovery.location,
-            sessionMetadata: metadata,
-          }),
-        ]);
-        return {
-          sessionId,
-          message: noResultsMsg,
-          context: metadata,
-          sources: [],
-          suggestions: quickReplies,
-          propertyCard: null,
-          propertyCards: [],
-          leadCaptureRequired: false,
-          advisorConnected: false,
-        };
+            message: networkMsg,
+            context: metadata,
+            sources: [],
+            suggestions: quickReplies,
+            propertyCard: null,
+            propertyCards: [],
+            leadCaptureRequired: false,
+            advisorConnected: false,
+          };
+        }
+
+        if (discoveryResult.status === 'NOT_FOUND' || discoveryResult.status === 'EMPTY_PAGE') {
+          const noResultsMsg = `I couldn’t find any matching properties in **${targetLoc}** on Prycoons right now. Would you like me to check another Ahmedabad area, such as Gota, Bodakdev, or Thaltej?`;
+          const quickReplies = ['Explore Gota 🏡', 'Explore Bodakdev', 'Explore Thaltej'];
+          await saveUserMessagePromise;
+          metadata.stepIndex += 1;
+          await Promise.all([
+            messageRepository.createMessage({
+              sessionId,
+              role: 'ASSISTANT',
+              content: noResultsMsg,
+              metadata: { sources: [], propertyCard: null, propertyCards: [] },
+            }),
+            sessionRepository.updateSession(sessionId, {
+              userName: metadata.userName,
+              intent: metadata.intent,
+              location: metadata.discovery.location,
+              sessionMetadata: metadata,
+            }),
+          ]);
+          return {
+            sessionId,
+            message: noResultsMsg,
+            context: metadata,
+            sources: [],
+            suggestions: quickReplies,
+            propertyCard: null,
+            propertyCards: [],
+            leadCaptureRequired: false,
+            advisorConnected: false,
+          };
+        }
       }
     }
 
@@ -1111,9 +1381,18 @@ Answer this question authoritatively, warmly, and concisely (under 95 words).
       },
       15
     );
-    const formattedContext = retrievalService.formatContextForPrompt(retrievedChunks);
 
-    const propertyMatch = propertyMatcherService.matchProperties(retrievedChunks, {
+    let activeChunks = retrievedChunks;
+    if (!activeChunks || activeChunks.length === 0) {
+      const existingChunks = await knowledgeRepository.getAllChunks(projectId);
+      if (existingChunks.length > 0) {
+        activeChunks = existingChunks.slice(0, 5);
+      }
+    }
+
+    const formattedContext = retrievalService.formatContextForPrompt(activeChunks);
+
+    const propertyMatch = propertyMatcherService.matchProperties(activeChunks, {
       location: locationQuery,
       propertyType: metadata.discovery.homeType || metadata.discovery.bhk,
       budgetNum: metadata.discovery.budgetNum,
@@ -1222,6 +1501,44 @@ Answer this question authoritatively, warmly, and concisely (under 95 words).
       metadata.displayedProperties = chosenCards;
       metadata.lastViewedProperty = chosenCards[0];
     }
+
+    // Natural name invitation after presenting property cards
+    if (
+      chosenCards.length > 0 &&
+      !metadata.userName &&
+      !metadata.lead.nameAsked &&
+      !metadata.lead.nameDeclined
+    ) {
+      if (
+        !responseText.toLowerCase().includes('may i know your name') &&
+        !responseText.toLowerCase().includes('what should i call you')
+      ) {
+        responseText += `\n\nMay I know your name so I can keep your shortlist handy and assist you better?`;
+      }
+      metadata.lead.awaitingName = true;
+      metadata.lead.nameAsked = true;
+    }
+
+    // Auto-capture or sync lead with requirements in repository
+    await leadRepository.upsertLead({
+      projectId,
+      sessionId,
+      name: metadata.userName || metadata.lead.name || 'Website Visitor',
+      phone: metadata.lead.phone || '',
+      intent: metadata.intent || 'buy',
+      status: metadata.lead.phone ? 'Qualified Lead' : 'Engaged Lead',
+      preferences: {
+        ...metadata.discovery,
+        locality: locationQuery,
+        location: locationQuery,
+        bhk: cleanBhk,
+        buyOrRent: metadata.intent || 'buy',
+        buyRent: metadata.intent || 'buy',
+        budget: metadata.discovery.budget,
+        budgetNum: metadata.discovery.budgetNum,
+        matchedProjects: chosenCards.map((c) => c.title),
+      },
+    });
 
     // Auto-capture lead if phone info was provided
     if (metadata.lead.phone && !metadata.lead.captured) {

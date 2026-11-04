@@ -1,6 +1,8 @@
 import OpenAI from 'openai';
 import { ENV } from '../../config/env';
 import { logger } from '../../utils/logger';
+import { extractIndianMobileFromText } from '../../utils/phone';
+import { extractPersonNameFromText } from '../../config/greetings';
 
 export interface MessageInterpretation {
   intent:
@@ -218,6 +220,21 @@ Respond with JSON.
       };
     }
 
+    // 1.5 Phone & combo name+phone detection
+    const mobileFound = extractIndianMobileFromText(userMessage);
+    const candidateName = extractPersonNameFromText(userMessage);
+    if (mobileFound) {
+      return {
+        intent: 'LEAD_CAPTURE',
+        extractedCriteria: {
+          phone: mobileFound.normalized,
+          ...(candidateName ? { name: candidateName } : {}),
+        },
+        requiresDirectAnswer: true,
+        requiresPropertyRetrieval: false,
+      };
+    }
+
     // 2. Property search more
     if (/\b(show me more|more options|other options|show more)\b/i.test(tl)) {
       return {
@@ -258,7 +275,8 @@ Respond with JSON.
 
     // 5. Property search or Criteria Declaration
     const hasBhk = /\b([1-5])\s*bhk\b/i.test(tl) || /\b(one|two|three|four|five)\s*bhk\b/i.test(tl);
-    const hasBuy = /\b(want to buy|looking to buy|buy a|to buy|buying|buy)\b/i.test(tl) && !/\b(should i|vs|or rent)\b/i.test(tl);
+    const hasCr = /(cr|crore|crores)/i.test(tl);
+    const hasBuy = (/\b(want to buy|looking to buy|buy a|to buy|buying|buy)\b/i.test(tl) || hasCr) && !/\b(should i|vs|or rent)\b/i.test(tl);
     const hasRent = /\b(want to rent|looking to rent|rent a|to rent|renting|rent)\b/i.test(tl) && !/\b(should i|vs|or buy)\b/i.test(tl);
 
     let bhkMatch: string | undefined = undefined;
@@ -295,6 +313,17 @@ Respond with JSON.
       return {
         intent: 'GREETING',
         extractedCriteria: {},
+        requiresDirectAnswer: true,
+        requiresPropertyRetrieval: false,
+      };
+    }
+
+    if (candidateName) {
+      return {
+        intent: 'CONVERSATION',
+        extractedCriteria: {
+          name: candidateName,
+        },
         requiresDirectAnswer: true,
         requiresPropertyRetrieval: false,
       };

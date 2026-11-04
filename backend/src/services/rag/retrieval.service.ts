@@ -221,6 +221,7 @@ export class RetrievalService {
             const meta = typeof rawMeta === 'string' ? JSON.parse(rawMeta) : (rawMeta || {});
             const chunkLoc = normalizeLocality(meta.location) || meta.location;
             if (chunkLoc && chunkLoc.toLowerCase() === targetLoc.toLowerCase()) return true;
+            if (chunkLoc && new RegExp(`\\b${chunkLoc.toLowerCase().replace(/\\s+/g, '\\s+')}\\b`, 'i').test(query.toLowerCase())) return true;
             const reg = new RegExp(`\\b${targetLoc.replace(/\s+/g, '\\s+')}\\b`, 'i');
             return reg.test(chunk.content || '');
           })
@@ -295,7 +296,12 @@ export class RetrievalService {
           chunkLoc.toLowerCase() !== targetLower &&
           chunkLoc.toLowerCase() !== 'ahmedabad'
         ) {
-          score -= 2.0; // Heavy penalty for chunks that belong to a DIFFERENT locality
+          const isChunkLocInQuery = new RegExp(`\\b${chunkLoc.toLowerCase().replace(/\\s+/g, '\\s+')}\\b`, 'i').test(qLower);
+          if (isChunkLocInQuery) {
+            score += 0.80; // Boost when user asked for multiple localities (e.g. "Gota or Science City")
+          } else {
+            score -= 2.0; // Heavy penalty for chunks that belong to a DIFFERENT locality
+          }
         }
       } else if (filters.location) {
         const locLower = filters.location.toLowerCase();

@@ -451,6 +451,8 @@ export const PlatformProvider = ({ children }) => {
                 ? {
                     ...c,
                     userName: session.userName || c.userName,
+                    userPhone: session.lead?.phone || c.userPhone,
+                    leadStatus: session.lead?.phone ? 'Contact Provided' : c.leadStatus,
                     leadInterest: session.discovery?.bhk || session.discovery?.location || c.leadInterest,
                     messagesCount: updatedTranscript.length,
                     transcript: updatedTranscript,

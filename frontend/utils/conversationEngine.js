@@ -65,7 +65,7 @@ export const MARKETING_SERVICES = [
  */
 export const getTimeContext = (mockHour = null) => {
   const currentHour = mockHour !== null ? mockHour : new Date().getHours();
-  
+
   if (currentHour >= 5 && currentHour < 9) {
     return {
       period: 'early_morning',
@@ -125,11 +125,11 @@ const HUMAN_FILLERS = [
 ];
 
 export const PRYCOONS_WELCOME_MESSAGES = [
-  "Welcome to Prycoons! May I know your name, or are you looking to explore properties in Ahmedabad?",
-  "Hi there! What should I call you, or are you looking to buy or rent a property in Ahmedabad?",
-  "Hello! Welcome to Prycoons. What is your name, or how can we assist with your property search?",
-  "Hi! Welcome to Prycoons. May I have your name, or let's find a property that suits your needs.",
-  "Welcome to Prycoons! What should we call you, or what kind of property are you looking for?",
+  "Welcome to Prycoons! How can we assist with your property search in Ahmedabad today?",
+  "Hi there! Welcome to Prycoons. Are you looking to buy, rent, or explore properties?",
+  "Hello! Welcome to Prycoons. Let's find your ideal home in Ahmedabad.",
+  "Hi! Welcome to Prycoons. What kind of property are you looking for in Ahmedabad?",
+  "Welcome to Prycoons! Looking to buy or explore residential properties in Ahmedabad?",
 ];
 
 export const getWelcomeMessageForSession = (sessionId = '') => {
@@ -248,7 +248,7 @@ export const isValidPersonName = (name) => {
 const extractName = (text) => {
   if (!text) return '';
   const cleaned = text.trim();
-  
+
   // Pattern 1: Explicit introduction prefixes
   const prefixMatch = cleaned.match(
     /(?:i am|i'm|my name is|this is|call me|myself|you can call me)\s+([a-zA-Z]+(?:\s+[a-zA-Z]+)?)/i
@@ -726,7 +726,7 @@ export const processUserMessage = (userText, session, bot) => {
       `• **Price Guide**: ${propertyCard.priceRange}\n` +
       `• **Highlights**: ${propertyCard.amenities.slice(0, 3).join(', ')}\n\n` +
       `Would you like me to share the complete shortlist & floor plan brochure with you?`;
-    
+
     sourceCitation = `${propertyCard.title} Verified RERA Specifications`;
     quickReplies = ['Download brochure 📥', 'Send to Email 📩', 'View Right Here 👀'];
     nextState = 'DELIVERY_PREFERENCE';

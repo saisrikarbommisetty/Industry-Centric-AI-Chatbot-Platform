@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import { conversationService } from '../services/chatbot/conversation.service';
 import { sessionRepository } from '../repositories/session.repository';
 import { messageRepository } from '../repositories/message.repository';
+import { leadRepository } from '../repositories/lead.repository';
 import { AppError } from '../middleware/errorHandler.middleware';
 
 export class ChatController {
@@ -100,10 +101,19 @@ export class ChatController {
     try {
       const projectId = req.params.projectId || (req.query.projectId as string) || 'prycoons-ai';
       const sessions = await sessionRepository.getSessionsByProjectId(projectId);
+      const allProjectLeads = await leadRepository.getLeadsByProjectId(projectId);
+      const leadMap = new Map<string, any>();
+      for (const l of allProjectLeads) {
+        if (l.sessionId) leadMap.set(l.sessionId, l);
+      }
 
       // Format sessions into client-friendly transcript list for Conversations UI
       const formattedSessions = sessions.map((s) => {
         const meta = s.sessionMetadata || {};
+        const associatedLead = (s.leads && s.leads.length > 0) ? s.leads[0] : leadMap.get(s.id);
+        const candidatePhone = meta.lead?.phone || associatedLead?.phone || null;
+        const candidateName = s.userName || meta.userName || meta.lead?.name || associatedLead?.name || 'Website Visitor';
+
         const messages = (s.messages || []).map((m: any) => ({
           id: m.id,
           sender: m.role?.toLowerCase() === 'user' ? 'user' : 'bot',
@@ -119,10 +129,10 @@ export class ChatController {
           id: s.id,
           botId: s.projectId,
           botName: 'Prycoons Real Estate Assistant',
-          userName: s.userName || meta.userName || meta.lead?.name || 'Website Visitor',
-          userEmail: meta.lead?.email || 'visitor@example.com',
-          userPhone: meta.lead?.phone || '+91 98000 00000',
-          leadStatus: meta.lead?.captured ? 'Site Visit Requested' : 'Engaged Explorer',
+          userName: candidateName,
+          userEmail: meta.lead?.email || associatedLead?.email || 'visitor@example.com',
+          userPhone: candidatePhone || 'Not provided',
+          leadStatus: candidatePhone ? 'Contact Provided' : (meta.lead?.captured ? 'Site Visit Requested' : 'Engaged Explorer'),
           leadInterest: interest,
           budget: meta.discovery?.budget || 'Standard',
           channel: 'Web Assistant',

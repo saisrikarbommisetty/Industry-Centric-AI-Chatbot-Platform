@@ -3,6 +3,7 @@ import { prisma, isDatabaseConnected } from '../../config/database';
 import { logger } from '../../utils/logger';
 import { analyticsRepository } from '../../repositories/analytics.repository';
 import { projectRepository } from '../../repositories/project.repository';
+import { leadRepository } from '../../repositories/lead.repository';
 import {
   VisitRequestDTO,
   CreateVisitRequestInput,
@@ -203,8 +204,9 @@ export class VisitService {
   /**
    * Retrieve visit requests with filtering and search
    */
-  async getVisitRequests(filters: VisitFilterQuery = {}): Promise<VisitRequestDTO[]> {
-    const resolvedProjectId = filters.projectId;
+  async getVisitRequests(filters: VisitFilterQuery | string = {}): Promise<VisitRequestDTO[]> {
+    const filterObj: VisitFilterQuery = typeof filters === 'string' ? { projectId: filters } : filters;
+    const resolvedProjectId = filterObj.projectId;
     let results: VisitRequestDTO[] = [];
 
     // Fetch from database
@@ -245,22 +247,53 @@ export class VisitService {
       }
     }
 
+    // Merge chat-collected leads from lead repository
+    try {
+      const chatLeads = await leadRepository.getLeadsByProjectId(resolvedProjectId || 'prycoons-ai');
+      for (const lead of chatLeads) {
+        if (!results.some((r) => r.requestId === lead.id || r.conversationId === lead.sessionId || (lead.phone && r.mobileNumber === lead.phone))) {
+          const pref = (lead.preferences as any) || {};
+          results.push({
+            requestId: lead.id,
+            assistantId: lead.projectId,
+            assistantName: 'Prycoons Real Estate Assistant',
+            propertyName: pref.projectName || pref.location || 'General Inquiry',
+            propertyUrl: pref.sourceUrl || 'https://prycoons.com/',
+            propertyPrice: pref.budget || pref.price || 'Price on Request',
+            locality: pref.locality || pref.location || 'Ahmedabad',
+            city: 'Ahmedabad',
+            bhk: pref.bhk || pref.homeType || '3 BHK',
+            customerName: lead.name,
+            mobileNumber: lead.phone,
+            email: lead.email || 'visitor@example.com',
+            preferredDate: 'Flexible / Inquired via Chat',
+            customerNotes: `Intent: ${lead.intent || 'Buying'}. Preferred locality: ${pref.locality || 'Ahmedabad'}. BHK: ${pref.bhk || 'N/A'}.`,
+            visitStatus: (lead.status as any) || 'Qualified Lead',
+            submittedAt: (lead.createdAt ? new Date(lead.createdAt) : new Date()).toISOString(),
+            conversationId: lead.sessionId || 'N/A',
+          });
+        }
+      }
+    } catch (err: any) {
+      logger.warn(`Error including chat leads in visit requests: ${err.message}`);
+    }
+
     // Apply Filters
-    if (filters.status && filters.status !== 'all') {
+    if (filterObj.status && filterObj.status !== 'all') {
       results = results.filter(
-        (r) => r.visitStatus.toLowerCase() === filters.status!.toLowerCase()
+        (r) => r.visitStatus.toLowerCase() === filterObj.status!.toLowerCase()
       );
     }
 
-    if (filters.locality && filters.locality !== 'all') {
-      const locLow = filters.locality.toLowerCase().trim();
+    if (filterObj.locality && filterObj.locality !== 'all') {
+      const locLow = filterObj.locality.toLowerCase().trim();
       results = results.filter(
         (r) => r.locality && r.locality.toLowerCase().includes(locLow)
       );
     }
 
-    if (filters.search && filters.search.trim().length > 0) {
-      const q = filters.search.toLowerCase().trim();
+    if (filterObj.search && filterObj.search.trim().length > 0) {
+      const q = filterObj.search.toLowerCase().trim();
       results = results.filter(
         (r) =>
           r.customerName.toLowerCase().includes(q) ||
@@ -272,15 +305,15 @@ export class VisitService {
       );
     }
 
-    if (filters.startDate) {
-      const start = new Date(filters.startDate).getTime();
+    if (filterObj.startDate) {
+      const start = new Date(filterObj.startDate).getTime();
       if (!isNaN(start)) {
         results = results.filter((r) => new Date(r.submittedAt).getTime() >= start);
       }
     }
 
-    if (filters.endDate) {
-      const end = new Date(filters.endDate).getTime();
+    if (filterObj.endDate) {
+      const end = new Date(filterObj.endDate).getTime();
       if (!isNaN(end)) {
         results = results.filter((r) => new Date(r.submittedAt).getTime() <= end);
       }
@@ -295,8 +328,9 @@ export class VisitService {
   /**
    * Generate a professionally formatted Excel .xlsx workbook from persistent visit requests
    */
-  async exportVisitRequestsToExcel(filters: VisitFilterQuery = {}): Promise<{ buffer: Buffer; filename: string }> {
-    const records = await this.getVisitRequests(filters);
+  async exportVisitRequestsToExcel(filters: VisitFilterQuery | string = {}): Promise<{ buffer: Buffer; filename: string }> {
+    const filterObj: VisitFilterQuery = typeof filters === 'string' ? { projectId: filters } : filters;
+    const records = await this.getVisitRequests(filterObj);
 
     const todayStr = new Date().toISOString().split('T')[0];
     const filename = `Prycoons_Property_Visit_Requests_${todayStr}.xlsx`;

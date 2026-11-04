@@ -156,6 +156,12 @@ export interface ConversationLeadState {
   email?: string;
   captured?: boolean;
   newLaunchOptIn?: boolean | null;
+  awaitingName?: boolean;
+  nameAsked?: boolean;
+  nameDeclined?: boolean;
+  awaitingPhone?: boolean;
+  phoneAsked?: boolean;
+  phoneDeclined?: boolean;
 }
 
 export interface ChatSessionMetadata {

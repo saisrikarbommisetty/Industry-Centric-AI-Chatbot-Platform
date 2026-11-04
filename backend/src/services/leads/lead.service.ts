@@ -33,6 +33,14 @@ export class LeadService {
     return lead;
   }
 
+  async upsertLead(data: any): Promise<any> {
+    return leadRepository.upsertLead(data);
+  }
+
+  async getLeadBySession(sessionId: string, projectId?: string): Promise<any | null> {
+    return leadRepository.getLeadBySessionId(sessionId, projectId);
+  }
+
   async getProjectLeads(projectId: string): Promise<LeadDTO[]> {
     return leadRepository.getLeadsByProjectId(projectId);
   }

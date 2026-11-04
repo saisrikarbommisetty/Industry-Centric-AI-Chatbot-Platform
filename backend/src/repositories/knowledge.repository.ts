@@ -7,6 +7,41 @@ const memorySources: Map<string, any> = new Map();
 const memoryDocuments: Map<string, any> = new Map();
 const memoryChunks: Map<string, any> = new Map();
 
+function initializeDefaults() {
+  if (memoryChunks.size === 0) {
+    const docId = 'doc-seed-science-city';
+    memoryDocuments.set(docId, {
+      id: docId,
+      projectId: 'prycoons-ai',
+      sourceId: 'src-seed',
+      title: 'Aahvan Greens - 3 BHK Luxury Living in Science City, Ahmedabad',
+      url: 'https://prycoons.com/properties/aahvan-greens',
+      content: 'Aahvan Greens offers 3 BHK luxury living in Science City, Ahmedabad. Price starts at ₹1.65 Crore. Ready to move.',
+      tokenCount: 40,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    memoryChunks.set('chk-seed-1', {
+      id: 'chk-seed-1',
+      documentId: docId,
+      projectId: 'prycoons-ai',
+      content: 'Aahvan Greens offers 3 BHK luxury living in Science City, Ahmedabad. Price starts at ₹1.65 Crore. Ready to move.',
+      metadata: {
+        location: 'Science City',
+        bhk: '3 BHK',
+        price: '₹1.65 Crore',
+        priceNum: 165,
+        sourceUrl: 'https://prycoons.com/properties/aahvan-greens',
+        projectName: 'Aahvan Greens',
+      },
+      chunkIndex: 0,
+      createdAt: new Date(),
+    });
+  }
+}
+initializeDefaults();
+
 type KnowledgeChangeListener = (projectId?: string) => void;
 const knowledgeChangeListeners: KnowledgeChangeListener[] = [];
 
