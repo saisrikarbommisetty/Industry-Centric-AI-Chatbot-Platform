@@ -416,12 +416,15 @@ export class ConversationService {
       metadata.lead.phone = extractedMobile.normalized;
       metadata.lead.captured = true;
       metadata.lead.awaitingPhone = false;
+      metadata.lead.phoneAsked = false;
+      metadata.lead.awaitingName = false;
+      metadata.lead.nameAsked = false;
+      metadata.state = 'ENGAGED';
 
       if (candidateName && !metadata.userName) {
         const formatted = formatPersonName(candidateName);
         metadata.userName = formatted;
         metadata.lead.name = formatted;
-        metadata.lead.awaitingName = false;
       }
 
       await leadRepository.upsertLead({
@@ -514,7 +517,9 @@ export class ConversationService {
     }
 
     // 3. Check if user provided their name (without searching for properties in the same message)
+    const bothAlreadyCaptured = Boolean(metadata.userName && metadata.lead.phone);
     if (
+      !bothAlreadyCaptured &&
       candidateName &&
       !hasPropertySearchWords &&
       (metadata.lead.awaitingName ||
@@ -523,10 +528,12 @@ export class ConversationService {
         metadata.state === 'GREETING' ||
         isAnsweringGreeting)
     ) {
+      const wasNamePrompted = Boolean(metadata.lead.awaitingName || metadata.lead.nameAsked);
       const formatted = formatPersonName(candidateName);
       metadata.userName = formatted;
       metadata.lead.name = formatted;
       metadata.lead.awaitingName = false;
+      metadata.lead.nameAsked = false;
 
       // Always persist name to backend lead repository
       await leadRepository.upsertLead({
@@ -549,11 +556,16 @@ export class ConversationService {
       let nameReplyMsg = '';
       let quickReplies: string[] = [];
 
-      if (metadata.lead.awaitingName || metadata.lead.nameAsked) {
-        nameReplyMsg = `Nice to meet you, ${metadata.userName}! 👋 Could you also share your contact number so our property team can send you the brochures and updates directly on WhatsApp or phone?`;
-        quickReplies = ['+91 98250 12345', 'Prefer not to share', 'Explore more properties 🏡'];
-        metadata.lead.awaitingPhone = true;
-        metadata.lead.phoneAsked = true;
+      if (wasNamePrompted || (metadata.displayedProperties && metadata.displayedProperties.length > 0)) {
+        if (!metadata.lead.phone) {
+          nameReplyMsg = `Nice to meet you, ${metadata.userName}! 👋 Could you also share your contact number so our property team can send you the brochures and updates directly on WhatsApp or phone?`;
+          quickReplies = ['+91 98250 12345', 'Prefer not to share', 'Explore more properties 🏡'];
+          metadata.lead.awaitingPhone = true;
+          metadata.lead.phoneAsked = true;
+        } else {
+          nameReplyMsg = `Nice to meet you, ${metadata.userName}! 👋 How else can I assist you with your property search in Ahmedabad today?`;
+          quickReplies = ['Show more options ➕', 'Schedule site visit 📅', 'Download brochure 📄'];
+        }
       } else {
         const missingField = this.getMissingDiscoveryField(metadata);
         if (missingField === 'BHK') {
@@ -757,6 +769,9 @@ Answer this question authoritatively, warmly, and concisely (under 95 words).
           ? `\n\nReturning to your search — which locality in Ahmedabad do you prefer?`
           : `\n\nReturning to your search — which locality in Ahmedabad do you prefer?`;
         quickReplies = ['Gota', 'Science City / Sola', 'Tragad', 'Ambli / SG Highway', 'Bodakdev'];
+      } else if (metadata.displayedProperties && metadata.displayedProperties.length > 0) {
+        responseText += `\n\nWould you like more details on any of the properties shown above, or to schedule a private site visit?`;
+        quickReplies = ['Schedule site visit 📅', 'Download brochure 📥', 'Explore other options 🏡'];
       } else {
         responseText += `\n\nWould you like me to show you verified matching properties in **${metadata.discovery.location}**?`;
         quickReplies = [`Show properties in ${metadata.discovery.location} 🏡`, 'Explore other areas', 'Ask another question'];
@@ -770,7 +785,11 @@ Answer this question authoritatively, warmly, and concisely (under 95 words).
     // CASE D: GREETINGS & INTRODUCTIONS
     // ──────────────────────────────────────────────────────────────────────────
     else if (intent === 'GREETING') {
-      if (metadata.userName) {
+      if (metadata.userName && (metadata.lead.phone || metadata.state === 'ENGAGED' || (metadata.displayedProperties && metadata.displayedProperties.length > 0))) {
+        responseText = `Hello ${metadata.userName}! 😊 How can I assist you further with your property search in Ahmedabad today?`;
+        quickReplies = ['Explore more properties 🏡', 'Schedule site visit 📅', 'Download brochure 📥'];
+        metadata.state = 'ENGAGED';
+      } else if (metadata.userName) {
         responseText = `Nice to meet you, ${metadata.userName}! 👋 Are you looking to buy, rent, or just exploring in Ahmedabad?`;
         quickReplies = ['Looking to Buy 🏡', 'Thinking of Renting 🔑', 'Just Exploring ✨'];
         metadata.state = 'INTENT_DETECTION';
@@ -1129,8 +1148,20 @@ Answer this question authoritatively, warmly, and concisely (under 95 words).
           quickReplies = ['Share contact details', 'Download brochure 📥', 'Explore more properties 🏡'];
         }
       } else {
-        responseText = `You're very welcome! Let me know whenever you would like to explore properties or learn more about our projects in Ahmedabad.`;
-        quickReplies = ['Explore properties in Ahmedabad 🏡', 'Looking to Buy', 'Thinking of Renting'];
+        const isPoliteAck = /^(thanks|thank you|ok|okay|cool|nice|got it|sounds good|awesome|perfect|great|alright|fine)\b/i.test(textLower);
+        if (isPoliteAck) {
+          responseText = `You're very welcome${metadata.userName ? `, ${metadata.userName}` : ''}! 😊 Our property advisor will reach out with project details. In the meantime, feel free to ask any other questions about properties in Ahmedabad, or let me know if you would like to schedule a site visit!`;
+          quickReplies = ['Schedule site visit 📅', 'Download brochure 📥', 'Explore more properties 🏡'];
+        } else {
+          const generalChatPrompt = `You are Prycoons Real Estate Assistant, an expert property advisor representing Prycoons Real Estate in Ahmedabad, Gujarat.
+The user said: "${userText}".
+User context: Name is ${metadata.userName || 'Visitor'}. Intent is ${metadata.intent || 'buying'}. Preferred area is ${metadata.discovery.location || 'Ahmedabad'}, BHK is ${metadata.discovery.bhk || 'not specified'}.
+Please respond to the user warmly, helpfully, and concisely (under 50 words). Provide expert real estate assistance and guide them naturally towards property discovery, brochures, or site visits.`;
+
+          const aiResult = await openaiService.generateResponse(generalChatPrompt, userText, '');
+          responseText = aiResult.text.replace(/\*{3,}/g, '**').trim();
+          quickReplies = ['Explore properties in Ahmedabad 🏡', 'Schedule site visit 📅', 'Download brochure 📥'];
+        }
       }
     }
 
@@ -1868,8 +1899,7 @@ Answer this question authoritatively, warmly, and concisely (under 95 words).
         tl.includes('looking for') ||
         tl.includes('want to') ||
         tl.includes('find') ||
-        tl.includes('options') ||
-        metadata.explicitSearchRequested
+        tl.includes('options')
       ) {
         return 'PROPERTY_SEARCH';
       }
@@ -1904,7 +1934,17 @@ Answer this question authoritatively, warmly, and concisely (under 95 words).
       return 'CONVERSATION';
     }
 
-    // 7. CLARIFICATION: Answering discovery questions or providing preferences
+    // 7. CONVERSATION: polite acknowledgments / small talk
+    if (/^(thanks|thank you|ok|okay|cool|nice|got it|sounds good|bye|goodbye|awesome|perfect|great|alright|fine)[\s!.]*$/i.test(tl)) {
+      return 'CONVERSATION';
+    }
+
+    // 8. CLARIFICATION: Answering discovery questions or providing preferences
+    const textHasBHK = /([1-5]\s*bhk|bhk)/i.test(tl);
+    const textHasIntent = /\b(buy|buying|rent|renting)\b/i.test(tl);
+    const textHasBudget = /([0-9.]+\s*(?:cr|crore|lakh)|budget)/i.test(tl);
+    const textHasLocation = /(gota|science city|sola|bodakdev|ambli|tragad|chandkheda|thaltej|vastrapur|prahlad nagar)/i.test(tl);
+
     if (
       metadata.state === 'INTENT_DETECTION' ||
       metadata.state === 'NAME_COLLECTED' ||
@@ -1914,21 +1954,12 @@ Answer this question authoritatively, warmly, and concisely (under 95 words).
       metadata.state === 'DISCOVERY_MUST_HAVE' ||
       metadata.state === 'DISCOVERY_BUDGET' ||
       metadata.state === 'DISCOVERY_CONFIRM_SEARCH' ||
-      tl.includes('bhk') ||
-      tl.includes('buy') ||
-      tl.includes('rent') ||
-      tl.includes('budget') ||
-      tl.includes('crore') ||
-      tl.includes('lakh') ||
-      hasLocation ||
-      hasBHK
+      textHasBHK ||
+      textHasIntent ||
+      textHasBudget ||
+      textHasLocation
     ) {
       return 'CLARIFICATION';
-    }
-
-    // 8. CONVERSATION: polite acknowledgments / small talk
-    if (/^(thanks|thank you|ok|okay|cool|nice|got it|sounds good|bye|goodbye)[\s!.]*$/i.test(tl)) {
-      return 'CONVERSATION';
     }
 
     return 'CONVERSATION';

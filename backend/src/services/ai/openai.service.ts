@@ -534,7 +534,27 @@ Do not invent specific unverified property prices or availability.
       return 'Hi there 👋 Welcome to Prycoons Real Estate! How can I assist you with your home search or project questions today?';
     }
 
-    return "I'm currently checking our verified website records for the latest project availability. Could you let me know your preferred location (such as Gota, Tragad, Science City, or Ambli) or your budget range?";
+    if (/\b(amenities|amenity|facilities|facility|gym|pool|clubhouse|garden)\b/i.test(msg)) {
+      return "Our featured residential projects in Ahmedabad feature premium modern lifestyle amenities, including Landscaped Zen Gardens, a fully-equipped Clubhouse & Gymnasium, Swimming Pool, Children's Play Area, 24/7 Security, High-Speed Elevators, and EV Charging infrastructure. Let me know if you would like specific amenity details for any particular project!";
+    }
+
+    if (/\b(help|assist|how can you|what can you)\b/i.test(msg)) {
+      return "I can assist you with discovering verified residential and commercial properties in Ahmedabad, checking configurations and pricing, downloading official project brochures, or arranging private site visits with our property advisory team. What would you like to explore next?";
+    }
+
+    if (/\b(thank|thanks|great|cool|awesome|perfect|ok|okay)\b/i.test(msg)) {
+      return "You're very welcome! Feel free to ask if you have any questions about properties in Ahmedabad, or let me know if you would like to schedule a site visit or explore more options.";
+    }
+
+    if (/\b(buy or rent|rent or buy|difference between buying and renting)\b/i.test(msg)) {
+      return "In Ahmedabad, buying property in high-growth corridors like SG Highway, Science City, and Gota offers strong capital appreciation and long-term asset building. Renting provides flexibility with lower upfront commitment. If you plan to settle for 5+ years, purchasing a home is typically the more rewarding choice.";
+    }
+
+    if (/\b(price|pricing|rates|budget|cost)\b/i.test(msg)) {
+      return "Property prices in Ahmedabad vary by corridor: premium areas like Ambli, Bodakdev, and Science City range from ₹1.65 Cr to ₹3.50+ Cr for luxury 3 & 4 BHK residences, while emerging hubs like Gota and Tragad offer attractive options from ₹55 Lakh to ₹1.10 Cr.";
+    }
+
+    return "I'm here to assist with your property search in Ahmedabad! Feel free to ask about project availability, pricing, amenities, or let me know if you would like to explore other localities or schedule a private site visit.";
   }
 }
 
