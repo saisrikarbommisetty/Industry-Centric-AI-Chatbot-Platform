@@ -398,8 +398,8 @@ Respond with JSON.
     systemPrompt: string,
     userMessage: string,
     groundedContext: string = '',
-    temperatureOrConfig?: number | { botName?: string; industry?: string; industryName?: string; isRealEstate?: boolean },
-    botConfigArg?: { botName?: string; industry?: string; industryName?: string; isRealEstate?: boolean }
+    temperatureOrConfig?: number | { botName?: string; industry?: string; industryName?: string; isRealEstate?: boolean; websiteUrl?: string; systemInstructions?: string; description?: string },
+    botConfigArg?: { botName?: string; industry?: string; industryName?: string; isRealEstate?: boolean; websiteUrl?: string; systemInstructions?: string; description?: string }
   ): Promise<AIServiceResponse> {
     const temperature = typeof temperatureOrConfig === 'number' ? temperatureOrConfig : 0.2;
     const resolvedBotConfig = (typeof temperatureOrConfig === 'object' && temperatureOrConfig !== null ? temperatureOrConfig : botConfigArg) as any;

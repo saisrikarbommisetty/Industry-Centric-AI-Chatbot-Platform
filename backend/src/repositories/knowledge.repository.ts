@@ -1,6 +1,7 @@
 import { prisma, isDatabaseConnected } from '../config/database';
 import { cosineSimilarity, toPgVector, fromPgVector } from '../utils/vector';
 import { logger } from '../utils/logger';
+import { projectRepository } from './project.repository';
 
 // In-memory fallback stores
 const memorySources: Map<string, any> = new Map();
@@ -71,6 +72,7 @@ export class KnowledgeRepository {
     status?: string;
     size?: string;
     extractedSummary?: string;
+    lastIndexedAt?: Date;
   }): Promise<any> {
     const id = data.id || `src-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
     const rawType = (data.type || 'URL').toUpperCase();
@@ -90,7 +92,7 @@ export class KnowledgeRepository {
       createdAt: new Date(),
       updatedAt: new Date(),
       lastCrawledAt: null,
-      lastIndexedAt: null,
+      lastIndexedAt: data.lastIndexedAt || null,
       contentHash: null,
       errorMessage: null,
     };
@@ -103,10 +105,9 @@ export class KnowledgeRepository {
           projectInDb = await prisma.project.findUnique({ where: { slug: data.projectId } });
         }
         if (!projectInDb) {
-          const memProj = (await import('./project.repository')).projectRepository;
-          const cachedProj = await memProj.findById(data.projectId);
+          const cachedProj = await projectRepository.findById(data.projectId);
           if (cachedProj) {
-            await memProj.create(cachedProj);
+            await projectRepository.create(cachedProj);
             projectInDb = await prisma.project.findUnique({ where: { id: cachedProj.id || data.projectId } });
           }
         }
@@ -131,7 +132,6 @@ export class KnowledgeRepository {
   async getSourcesByProjectId(projectId: string): Promise<any[]> {
     let targetProjectIds = [projectId];
     try {
-      const { projectRepository } = await import('./project.repository');
       const proj = (await projectRepository.findById(projectId)) || (await projectRepository.findBySlug(projectId));
       if (proj) {
         targetProjectIds = Array.from(new Set([projectId, proj.id, proj.slug].filter(Boolean)));
@@ -282,7 +282,6 @@ export class KnowledgeRepository {
   async getDocumentsByProjectId(projectId: string): Promise<any[]> {
     let targetProjectIds = [projectId];
     try {
-      const { projectRepository } = await import('./project.repository');
       const proj = (await projectRepository.findById(projectId)) || (await projectRepository.findBySlug(projectId));
       if (proj) {
         targetProjectIds = Array.from(new Set([projectId, proj.id, proj.slug].filter(Boolean)));
@@ -384,7 +383,6 @@ export class KnowledgeRepository {
   ): Promise<any[]> {
     let targetProjectIds = [projectId];
     try {
-      const { projectRepository } = await import('./project.repository');
       const proj = (await projectRepository.findById(projectId)) || (await projectRepository.findBySlug(projectId));
       if (proj) {
         targetProjectIds = Array.from(new Set([projectId, proj.id, proj.slug].filter(Boolean)));
@@ -465,7 +463,6 @@ export class KnowledgeRepository {
   async getAllChunks(projectId: string): Promise<any[]> {
     let targetProjectIds = [projectId];
     try {
-      const { projectRepository } = await import('./project.repository');
       const proj = (await projectRepository.findById(projectId)) || (await projectRepository.findBySlug(projectId));
       if (proj) {
         targetProjectIds = Array.from(new Set([projectId, proj.id, proj.slug].filter(Boolean)));

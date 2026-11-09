@@ -1479,6 +1479,7 @@ Please respond to the user warmly, helpfully, and concisely (under 50 words). Pr
       const allChunks = await knowledgeRepository.getAllChunks(projectId);
       if (allChunks && allChunks.length > 0) {
         retrievedChunks = allChunks.slice(0, 5).map((c: any) => ({
+          id: c.id,
           chunkId: c.id,
           content: c.content,
           sourceTitle: c.sourceTitle || c.metadata?.title || 'Knowledge Base',

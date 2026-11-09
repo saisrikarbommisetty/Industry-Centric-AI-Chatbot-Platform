@@ -19,7 +19,7 @@ export class ChunkingService {
   /**
    * Split a crawled page into high-quality semantic chunks preserving entities
    */
-  chunkPage(page: CrawledPage, botConfig?: { industry?: string; botName?: string }): SemanticChunk[] {
+  chunkPage(page: CrawledPage, botConfig?: { industry?: string; botName?: string; isRealEstate?: boolean }): SemanticChunk[] {
     const chunks: SemanticChunk[] = [];
     let chunkIndex = 0;
     const isRealEstate = botConfig?.industry === 'real-estate' || page.url.includes('prycoons.com');

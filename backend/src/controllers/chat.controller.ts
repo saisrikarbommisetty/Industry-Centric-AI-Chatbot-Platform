@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { conversationService } from '../services/chatbot/conversation.service';
+import { projectRepository } from '../repositories/project.repository';
 import { sessionRepository } from '../repositories/session.repository';
 import { messageRepository } from '../repositories/message.repository';
 import { leadRepository } from '../repositories/lead.repository';

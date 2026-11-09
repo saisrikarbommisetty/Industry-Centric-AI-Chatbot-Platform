@@ -436,7 +436,7 @@ export class RetrievalService {
    * Format retrieved chunks into a clean grounded context block for LLM prompt
    */
   formatContextForPrompt(chunks: RetrievedChunkResult[], maxChunks = 3, botConfig?: { industry?: string; botName?: string }): string {
-    const isRealEstate = (botConfig?.industry === 'real-estate') && botConfig?.industry !== 'healthcare' && botConfig?.industry !== 'education';
+    const isRealEstate = botConfig?.industry === 'real-estate';
     if (!chunks || chunks.length === 0) {
       return isRealEstate
         ? 'No specific property records were retrieved for this query.'
