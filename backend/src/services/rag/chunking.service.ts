@@ -22,25 +22,27 @@ export class ChunkingService {
   chunkPage(page: CrawledPage, botConfig?: { industry?: string; botName?: string; isRealEstate?: boolean }): SemanticChunk[] {
     const chunks: SemanticChunk[] = [];
     let chunkIndex = 0;
-    const isRealEstate = botConfig?.industry === 'real-estate' || page.url.includes('prycoons.com');
+    const isPrycoons = Boolean(botConfig?.botName?.toLowerCase().includes('prycoons') || page.url.includes('prycoons.com'));
+    const isRealEstate = Boolean(botConfig?.industry === 'real-estate' || botConfig?.isRealEstate || isPrycoons);
 
     // 1. Process structured properties from crawler metadata if available (for real estate bots)
     if (isRealEstate && page.metadata?.properties && page.metadata.properties.length > 0) {
       for (const prop of page.metadata.properties) {
         const pName = prop.projectName || 'Project';
-        const loc = prop.location || page.metadata.location || 'Ahmedabad';
+        const loc = prop.location || page.metadata.location || (isPrycoons ? 'Ahmedabad' : '');
         const bhk = prop.bhk || prop.propertyType || '3 BHK';
         const price = prop.price || 'Price on request';
         const area = prop.carpetArea || 'Spacious layout';
-        const status = prop.propertyStatus || 'Under Construction (RERA Approved)';
-        const developer = prop.developer || (botConfig?.botName ? `${botConfig.botName} Partner` : 'Prycoons Partner');
+        const status = prop.propertyStatus || (isPrycoons ? 'Under Construction (RERA Approved)' : 'Verified Property');
+        const developer = prop.developer || (botConfig?.botName ? `${botConfig.botName} Partner` : (isPrycoons ? 'Prycoons Partner' : 'Developer'));
         const amenitiesList = prop.amenities && prop.amenities.length > 0 ? prop.amenities.join(', ') : 'Standard Amenities';
+
+        const locStr = loc ? (isPrycoons && !loc.toLowerCase().includes('ahmedabad') ? `${loc}, Ahmedabad` : loc) : '';
 
         const content = `
 Project: ${pName}
 Developer: ${developer}
-Location: ${loc}, Ahmedabad
-Configuration: ${bhk}
+${locStr ? `Location: ${locStr}\n` : ''}Configuration: ${bhk}
 Price: ${price}
 Area: ${area}
 Status: ${status}
@@ -55,7 +57,7 @@ Verified Details: Official listing from ${botConfig?.botName || 'our website'}.
             projectName: pName,
             developer,
             location: loc,
-            city: prop.city || 'Ahmedabad',
+            city: prop.city || (isPrycoons ? 'Ahmedabad' : ''),
             propertyType: prop.propertyType || (bhk.includes('2') ? '2BHK' : bhk.includes('4') ? '4BHK' : '3BHK'),
             bhk,
             price: prop.price,
@@ -84,24 +86,39 @@ Verified Details: Official listing from ${botConfig?.botName || 'our website'}.
 
     // 2. Also chunk the general page overview / introductory text
     const text = page.extractedText;
-    const paragraphs = text
+    const rawParagraphs = text
       .split(/\n\s*\n/)
       .map((p) => p.trim())
       .filter((p) => p.length > 30 && !p.startsWith('Under Construction Rera Approved')); // avoid duplicating extracted listing cards
+
+    // Break down oversized paragraphs so a single paragraph never balloons a chunk
+    const paragraphs: string[] = [];
+    for (const p of rawParagraphs) {
+      if (p.length > this.targetChunkSize * 2) {
+        for (let i = 0; i < p.length; i += this.targetChunkSize) {
+          const slice = p.slice(i, i + this.targetChunkSize).trim();
+          if (slice.length > 25) {
+            paragraphs.push(slice);
+          }
+        }
+      } else {
+        paragraphs.push(p);
+      }
+    }
 
     let currentChunk = '';
     const sectionMetadata = {
       title: page.title,
       sourceUrl: page.url,
       documentType: page.metadata?.documentType || 'general_page',
-      location: page.metadata?.location || (isRealEstate ? 'Ahmedabad' : ''),
+      location: page.metadata?.location || (isPrycoons ? 'Ahmedabad' : ''),
       propertyType: page.metadata?.propertyType || '',
     };
 
     for (const para of paragraphs) {
       if ((currentChunk + '\n\n' + para).length > this.targetChunkSize && currentChunk.length > 0) {
         chunks.push({
-          content: currentChunk.trim(),
+          content: currentChunk.trim().slice(0, 1200),
           metadata: { ...sectionMetadata },
           chunkIndex: chunkIndex++,
         });
@@ -116,7 +133,7 @@ Verified Details: Official listing from ${botConfig?.botName || 'our website'}.
 
     if (currentChunk.trim().length > 30) {
       chunks.push({
-        content: currentChunk.trim(),
+        content: currentChunk.trim().slice(0, 1200),
         metadata: { ...sectionMetadata },
         chunkIndex: chunkIndex++,
       });

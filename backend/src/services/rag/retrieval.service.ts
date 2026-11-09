@@ -159,10 +159,11 @@ export class RetrievalService {
     query: string,
     sessionContext?: any,
     topKOverride?: number,
-    botConfig?: { industry?: string; botName?: string }
+    botConfig?: { industry?: string; botName?: string; websiteUrl?: string }
   ): Promise<RetrievedChunkResult[]> {
     const k = topKOverride || this.topK;
-    const isRealEstate = (botConfig?.industry === 'real-estate' || projectId === 'prycoons-ai') && botConfig?.industry !== 'healthcare' && botConfig?.industry !== 'education';
+    const isPrycoons = projectId === 'prycoons-ai' || projectId.includes('prycoons') || Boolean(botConfig?.botName?.toLowerCase().includes('prycoons'));
+    const isRealEstate = (botConfig?.industry === 'real-estate' || isPrycoons) && botConfig?.industry !== 'healthcare' && botConfig?.industry !== 'education';
     const filters = this.extractQueryFilters(query, sessionContext);
     const targetLoc = isRealEstate ? normalizeLocality(filters.location) : undefined;
 
@@ -342,14 +343,17 @@ export class RetrievalService {
           score += (matchedTokens / queryTokens.length) * 0.20;
         }
 
+        const defaultTitle = isPrycoons ? 'Prycoons Real Estate Records' : `${botConfig?.botName || 'Business'} Knowledge Base`;
+        const defaultUrl = isPrycoons ? 'https://prycoons.com/' : (botConfig?.websiteUrl || '');
+
         scoredList.push({
           id: c.id,
           projectId: c.projectId || projectId,
           content: c.content,
           metadata: meta,
           score,
-          sourceTitle: c.sourceTitle || meta.projectName || 'Prycoons Real Estate Records',
-          sourceUrl: c.sourceUrl || meta.sourceUrl || 'https://prycoons.com/',
+          sourceTitle: c.sourceTitle || meta.projectName || defaultTitle,
+          sourceUrl: c.sourceUrl || meta.sourceUrl || defaultUrl,
         });
       } else {
         // Multi-Industry / General Bot scoring
@@ -447,9 +451,23 @@ export class RetrievalService {
     const validChunks = chunks.filter((c) => c.score > 0);
     const chosen = validChunks.length > 0 ? validChunks.slice(0, maxChunks) : chunks.slice(0, maxChunks);
 
-    return chosen
-      .map((c, i) => `[Source ${i + 1}: ${c.sourceTitle}${c.sourceUrl ? ` | ${c.sourceUrl}` : ''}]\n${c.content}`)
-      .join('\n\n---\n\n');
+    let totalChars = 0;
+    const maxTotalChars = 6000;
+    const formattedBlocks: string[] = [];
+
+    for (let i = 0; i < chosen.length; i++) {
+      const c = chosen[i];
+      // Cap each chunk to max 1500 characters to prevent oversized single chunks
+      const chunkText = (c.content || '').slice(0, 1500).trim();
+      const block = `[Source ${i + 1}: ${c.sourceTitle}${c.sourceUrl ? ` | ${c.sourceUrl}` : ''}]\n${chunkText}`;
+      if (totalChars + block.length > maxTotalChars && formattedBlocks.length > 0) {
+        break;
+      }
+      formattedBlocks.push(block);
+      totalChars += block.length;
+    }
+
+    return formattedBlocks.join('\n\n---\n\n');
   }
 }
 

@@ -162,10 +162,15 @@ export const createInitialSession = (bot = null, customSessionId = null) => {
   let initialText = '';
   let initialQuickReplies = [];
 
-  if (isRealEstate) {
+  if (isPrycoons) {
     // Dynamic single-sentence welcome message representing Prycoons Real Estate
     initialText = getWelcomeMessageForSession(sessionId);
     initialQuickReplies = ['Looking to Buy 🏡', 'Thinking of Renting 🔑', 'Just Exploring ✨'];
+  } else if (isRealEstate) {
+    initialText = bot?.welcomeMessage || `Welcome to ${botBusinessName}! How can we assist with your property search today?`;
+    initialQuickReplies = (bot?.suggestedQuestions && bot.suggestedQuestions.length > 0)
+      ? bot.suggestedQuestions
+      : ['Looking to Buy 🏡', 'Thinking of Renting 🔑', 'Explore Properties ✨'];
   } else if (isApex) {
     initialText = "Hi there! Welcome to Apex Brand Studio. How can we assist your brand today?";
     initialQuickReplies = ['Brand identity & logo 🎨', 'Website & UX design 💻', 'Social media growth 📈'];
@@ -473,14 +478,22 @@ export const processUserMessage = (userText, session, bot) => {
       replyText = `A warm welcome to ${botBusinessName}${userNameStr}! 🛎️\n\n${timeCtx.icebreaker}\n\nAre you planning a leisure holiday getaway, a private weekend villa stay, or fine dining?`;
       quickReplies = ['Luxury Suite / Villa stay', 'Weekend getaway packages', 'Fine dining reservations', 'Spa & wellness'];
       nextState = 'HOSPITALITY_INTENT';
-    } else if (!isRealEstate) {
-      replyText = `Hello${userNameStr}! 👋\n\nWelcome to ${botBusinessName}. How can I assist you with our services, products, or information today?`;
-      quickReplies = bot?.suggestedQuestions && bot.suggestedQuestions.length > 0
-        ? bot.suggestedQuestions.slice(0, 3)
-        : ['What services do you offer?', 'Pricing & Details', 'Speak with our team'];
+    } else if (!isPrycoons) {
+      // Non-Prycoons bots (including other real estate brands like Claads)
+      if (isRealEstate) {
+        replyText = `Welcome to ${botBusinessName}${userNameStr}! How can I assist you with properties, locations, or pricing today?`;
+        quickReplies = (bot?.suggestedQuestions && bot.suggestedQuestions.length > 0)
+          ? bot.suggestedQuestions.slice(0, 3)
+          : ['Explore Properties 🏡', 'Pricing & Availability 💰', 'Contact Team 📞'];
+      } else {
+        replyText = `Hello${userNameStr}! 👋\n\nWelcome to ${botBusinessName}. How can I assist you with our services, products, or information today?`;
+        quickReplies = (bot?.suggestedQuestions && bot.suggestedQuestions.length > 0)
+          ? bot.suggestedQuestions.slice(0, 3)
+          : ['What services do you offer?', 'Pricing & Details', 'Speak with our team'];
+      }
       nextState = 'GENERAL_DISCOVERY';
     } else {
-      // REAL ESTATE DEFAULT
+      // PRYCOONS REAL ESTATE DEFAULT
       if (session.userName) {
         replyText = `Nice to meet you, ${session.userName}! 👋 Are you looking to buy, rent, or just exploring in Ahmedabad?`;
       } else if (isAffirmative) {
@@ -746,28 +759,38 @@ export const processUserMessage = (userText, session, bot) => {
   else if (session.state === 'DISCOVERY_BUDGET') {
     session.discovery.budget = text.includes('₹') || text.includes('Cr') || text.includes('Lakh') ? text : '₹1.35 Cr - ₹1.85 Cr';
 
-    // Pick best matching property card
-    if (session.discovery.homeType.includes('4') || session.discovery.homeType.includes('5') || textLower.includes('4.5') || textLower.includes('8') || session.discovery.location.includes('Bodakdev')) {
-      propertyCard = PRYCOONS_PROJECTS[0]; // The Sovereign
-    } else if (session.discovery.location.includes('GIFT') || session.discovery.homeType.includes('2') || textLower.includes('90') || textLower.includes('95')) {
-      propertyCard = PRYCOONS_PROJECTS[1]; // GIFT Horizon
-    } else if (session.intent === 'commercial' || textLower.includes('commercial')) {
-      propertyCard = PRYCOONS_PROJECTS[3]; // Capital Square
+    if (isPrycoons) {
+      // Pick best matching property card for Prycoons
+      if (session.discovery.homeType.includes('4') || session.discovery.homeType.includes('5') || textLower.includes('4.5') || textLower.includes('8') || session.discovery.location.includes('Bodakdev')) {
+        propertyCard = PRYCOONS_PROJECTS[0]; // The Sovereign
+      } else if (session.discovery.location.includes('GIFT') || session.discovery.homeType.includes('2') || textLower.includes('90') || textLower.includes('95')) {
+        propertyCard = PRYCOONS_PROJECTS[1]; // GIFT Horizon
+      } else if (session.intent === 'commercial' || textLower.includes('commercial')) {
+        propertyCard = PRYCOONS_PROJECTS[3]; // Capital Square
+      } else {
+        propertyCard = PRYCOONS_PROJECTS[2]; // Emerald Heights
+      }
+
+      const loc = session.discovery.location || 'Ahmedabad';
+      const bhk = session.discovery.homeType || '3BHK';
+      const bud = session.discovery.budget || 'your preferred budget';
+      const must = session.discovery.mustHave ? ` with a ${session.discovery.mustHave.toLowerCase()}` : '';
+
+      replyText = `Got it 👍 A **${bhk}** in **${loc}**, around **${bud}**${must}.\n\nHere is our prime match that fits your lifestyle perfectly:\n\n` +
+        `✨ **${propertyCard.title}** — ${propertyCard.tagline}\n` +
+        `• **Configuration**: ${propertyCard.bhk} (${propertyCard.carpetArea})\n` +
+        `• **Price Guide**: ${propertyCard.priceRange}\n` +
+        `• **Highlights**: ${propertyCard.amenities.slice(0, 3).join(', ')}\n\n` +
+        `Would you like me to share the complete shortlist & floor plan brochure with you?`;
+      quickReplies = ['Share brochure on WhatsApp 📥', 'Schedule private visit 📅', 'Explore another area'];
+      nextState = 'LEAD_PHONE';
     } else {
-      propertyCard = PRYCOONS_PROJECTS[2]; // Emerald Heights
+      const loc = session.discovery.location || 'your preferred location';
+      const bhk = session.discovery.homeType || 'properties';
+      replyText = `Thank you for sharing your preferences! For ${botBusinessName}, we are reviewing available ${bhk} in ${loc}.\n\nWould you like our representative to contact you with the latest verified listings and brochures?`;
+      quickReplies = ['Leave contact details 📱', 'Ask a question', 'Browse website'];
+      nextState = 'LEAD_PHONE';
     }
-
-    const loc = session.discovery.location || 'Ahmedabad';
-    const bhk = session.discovery.homeType || '3BHK';
-    const bud = session.discovery.budget || 'your preferred budget';
-    const must = session.discovery.mustHave ? ` with a ${session.discovery.mustHave.toLowerCase()}` : '';
-
-    replyText = `Got it 👍 A **${bhk}** in **${loc}**, around **${bud}**${must}.\n\nHere is our prime match that fits your lifestyle perfectly:\n\n` +
-      `✨ **${propertyCard.title}** — ${propertyCard.tagline}\n` +
-      `• **Configuration**: ${propertyCard.bhk} (${propertyCard.carpetArea})\n` +
-      `• **Price Guide**: ${propertyCard.priceRange}\n` +
-      `• **Highlights**: ${propertyCard.amenities.slice(0, 3).join(', ')}\n\n` +
-      `Would you like me to share the complete shortlist & floor plan brochure with you?`;
 
     sourceCitation = `${propertyCard.title} Verified RERA Specifications`;
     quickReplies = ['Download brochure 📥', 'Send to Email 📩', 'View Right Here 👀'];

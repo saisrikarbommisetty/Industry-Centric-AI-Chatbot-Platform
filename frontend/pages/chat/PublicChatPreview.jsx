@@ -111,7 +111,27 @@ export const PublicChatPreview = () => {
   const navigate = useNavigate();
   const { bots, sendChatMessage, submitLead, addToast } = usePlatform();
 
-  const currentBot = bots.find((b) => b.id === botId) || bots[0];
+  const [fetchedBot, setFetchedBot] = useState(null);
+  const foundBot = bots.find((b) => b.id === botId || b.slug === botId);
+  const currentBot = foundBot || fetchedBot || (botId && botId !== 'prycoons-ai' ? {
+    id: botId,
+    name: botId.replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()),
+    businessName: botId.replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()),
+    industryId: 'real-estate',
+    industryName: 'Real Estate & Property',
+    welcomeMessage: `Welcome to our assistant! How can we help you today?`,
+  } : bots[0]);
+
+  useEffect(() => {
+    if (!foundBot && botId) {
+      api.projects.get(botId).then((res) => {
+        if (res?.success && res?.data) {
+          setFetchedBot(res.data);
+        }
+      }).catch(() => {});
+    }
+  }, [botId, foundBot]);
+
   const messagesEndRef = useRef(null);
 
   // Conversational session ref & state
@@ -453,7 +473,10 @@ export const PublicChatPreview = () => {
 
   const handleDownloadBrochure = async (property) => {
     const card = property || sessionRef.current?.lastViewedProperty || (messages.flatMap((m) => m.propertyCards || []).slice(-1)[0]) || (messages.find((m) => m.propertyCard)?.propertyCard);
-    const title = card?.title || 'Prycoons Ahmedabad Residences';
+    const isPrycoons = currentBot?.id === 'prycoons-ai' || currentBot?.name?.toLowerCase().includes('prycoons');
+    const defaultTitle = isPrycoons ? 'Prycoons Ahmedabad Residences' : `${currentBot?.name || 'Property'} Brochure`;
+    const defaultUrl = isPrycoons ? 'https://prycoons.com/' : (currentBot?.websiteUrl || '#');
+    const title = card?.title || defaultTitle;
 
     addToast(`Preparing official PDF brochure for ${title}... 📄`, 'info');
 
@@ -472,17 +495,17 @@ export const PublicChatPreview = () => {
     // 2. Try POST generatePdf
     try {
       const res = await api.brochures.generatePdf({
-        title: card?.title || 'Prycoons Ahmedabad Residences',
-        location: card?.location || 'Ahmedabad, Gujarat',
-        bhk: card?.bhk || '3 & 4 BHK Luxury Residences',
+        title,
+        location: card?.location || (isPrycoons ? 'Ahmedabad, Gujarat' : 'Verified Location'),
+        bhk: card?.bhk || 'Residential Property',
         priceRange: card?.priceRange || 'Available upon inquiry',
         carpetArea: card?.carpetArea || 'Super Built-Up Area',
-        status: card?.status || 'RERA Gujarat Approved',
+        status: card?.status || 'Verified Listing',
         amenities: card?.amenities && card.amenities.length > 0
           ? card.amenities
           : ['Landscaped Zen Garden', 'State-of-the-art Gymnasium', 'Swimming Pool & Deck', 'Clubhouse & Indoor Sports', '24/7 Security & CCTV'],
         image: card?.image,
-        sourceUrl: card?.propertyDetailUrl || card?.sourceUrl || 'https://prycoons.com/',
+        sourceUrl: card?.propertyDetailUrl || card?.sourceUrl || defaultUrl,
         description: card?.description
       });
 
@@ -508,13 +531,13 @@ export const PublicChatPreview = () => {
     // 3. Resilient GET fallback
     try {
       const params = new URLSearchParams({
-        title: card?.title || 'Prycoons Ahmedabad Residences',
-        location: card?.location || 'Ahmedabad, Gujarat',
-        bhk: card?.bhk || '3 & 4 BHK Luxury Residences',
+        title,
+        location: card?.location || (isPrycoons ? 'Ahmedabad, Gujarat' : 'Verified Location'),
+        bhk: card?.bhk || 'Residential Property',
         price: card?.priceRange || 'Available upon inquiry',
         carpetArea: card?.carpetArea || 'Super Built-Up Area',
-        status: card?.status || 'RERA Gujarat Approved',
-        url: card?.propertyDetailUrl || card?.sourceUrl || 'https://prycoons.com/'
+        status: card?.status || 'Verified Listing',
+        url: card?.propertyDetailUrl || card?.sourceUrl || defaultUrl
       });
       const downloadUrl = `/api/brochures/download?${params.toString()}`;
       const link = document.createElement('a');
@@ -664,8 +687,10 @@ export const PublicChatPreview = () => {
     }
 
     const card = leadFormData.selectedProperty;
-    const propertyTitle = card?.title || leadFormData.preferredBhk || 'Prycoons Property';
-    const propertyUrl = card?.propertyDetailUrl || card?.sourceUrl || (card ? 'https://prycoons.com/' : undefined);
+    const isPrycoons = currentBot?.id === 'prycoons-ai' || currentBot?.name?.toLowerCase().includes('prycoons');
+    const defaultPropertyTitle = isPrycoons ? 'Prycoons Property' : `${currentBot?.name || 'Company'} Property`;
+    const propertyTitle = card?.title || leadFormData.preferredBhk || defaultPropertyTitle;
+    const propertyUrl = card?.propertyDetailUrl || card?.sourceUrl || (card && isPrycoons ? 'https://prycoons.com/' : (card ? currentBot?.websiteUrl : undefined));
 
     try {
       // 1. Submit lead to existing PlatformContext
@@ -814,8 +839,8 @@ export const PublicChatPreview = () => {
               <div className="online-indicator" />
             </div>
             <div className="chat-title-group">
-              <div className="chat-title">{currentBot?.name || 'Prycoons Assistant'}</div>
-              <div className="chat-subtitle">{currentBot?.industryName || 'Prycoons Real Estate'} • Online</div>
+              <div className="chat-title">{currentBot?.name || 'AI Assistant'}</div>
+              <div className="chat-subtitle">{currentBot?.industryName || (currentBot?.name?.toLowerCase().includes('prycoons') ? 'Prycoons Real Estate' : 'Online Assistant')} • Online</div>
             </div>
           </div>
 
@@ -977,7 +1002,8 @@ export const PublicChatPreview = () => {
                                 </button>
                                 {(() => {
                                   const propUrl = card.propertyDetailUrl || card.sourceUrl;
-                                  const isBareHome = !propUrl || propUrl.trim() === 'https://prycoons.com/' || propUrl.trim() === 'https://prycoons.com';
+                                  const isPrycoons = currentBot?.id === 'prycoons-ai' || currentBot?.name?.toLowerCase().includes('prycoons');
+                                  const isBareHome = !propUrl || propUrl === '#' || (isPrycoons && (propUrl.trim() === 'https://prycoons.com/' || propUrl.trim() === 'https://prycoons.com'));
                                   if (isBareHome) return null;
                                   return (
                                     <a

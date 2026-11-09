@@ -73,7 +73,8 @@ export class PropertyMatcherService {
       budgetNum?: number;
       mustHave?: string;
       projectName?: string;
-    }
+    },
+    isPrycoons: boolean = true
   ): PropertyMatchResult {
     const propertyCards: PropertyCardData[] = [];
 
@@ -149,39 +150,45 @@ export class PropertyMatcherService {
 
         // Resolve exact canonical property-detail URL
         let detailUrl = meta.propertyDetailUrl || meta.sourceUrl || chunk.sourceUrl;
-        const normName = projectName.toLowerCase().trim();
-        if (CANONICAL_PROPERTY_URLS[normName]) {
-          detailUrl = CANONICAL_PROPERTY_URLS[normName];
-        } else {
-          for (const [key, url] of Object.entries(CANONICAL_PROPERTY_URLS)) {
-            if (normName === key || normName.includes(key) || key.includes(normName)) {
-              detailUrl = url;
-              break;
+        if (isPrycoons) {
+          const normName = projectName.toLowerCase().trim();
+          if (CANONICAL_PROPERTY_URLS[normName]) {
+            detailUrl = CANONICAL_PROPERTY_URLS[normName];
+          } else {
+            for (const [key, url] of Object.entries(CANONICAL_PROPERTY_URLS)) {
+              if (normName === key || normName.includes(key) || key.includes(normName)) {
+                detailUrl = url;
+                break;
+              }
             }
+          }
+
+          // Never redirect to the bare homepage or status filter page
+          if (
+            !detailUrl ||
+            detailUrl === 'https://prycoons.com/' ||
+            detailUrl === 'https://prycoons.com' ||
+            detailUrl.includes('/status/')
+          ) {
+            detailUrl = undefined;
           }
         }
 
-        // Never redirect to the bare homepage or status filter page
-        if (
-          !detailUrl ||
-          detailUrl === 'https://prycoons.com/' ||
-          detailUrl === 'https://prycoons.com' ||
-          detailUrl.includes('/status/')
-        ) {
-          detailUrl = undefined;
-        }
+        const defaultFullLoc = isPrycoons
+          ? `${normLoc || 'Ahmedabad'}, Gujarat`
+          : (normLoc ? `${normLoc}${meta.city ? `, ${meta.city}` : ''}` : (meta.city || 'Prime Location'));
 
         const card: PropertyCardData = {
           id: `card-${projectName.toLowerCase().replace(/[^a-z0-9]/g, '-')}`,
           title: projectName,
           propertyName: projectName,
-          tagline: `${bhk || 'Residential Property'} in ${normLoc || 'Ahmedabad'}`,
-          location: `${normLoc || 'Ahmedabad'}, Gujarat`,
+          tagline: `${bhk || 'Residential Property'}${normLoc ? ` in ${normLoc}` : ''}`,
+          location: defaultFullLoc,
           bhk: bhk || '3 BHK',
           carpetArea: carpetArea || undefined,
           priceRange: price || 'Price on request',
           priceNum: priceNum || undefined,
-          status: meta.propertyStatus || 'Under Construction (RERA Approved)',
+          status: meta.propertyStatus || (isPrycoons ? 'Under Construction (RERA Approved)' : 'Verified Property'),
           image,
           propertyImageUrl: image,
           amenities,
@@ -312,7 +319,7 @@ export class PropertyMatcherService {
       alternatives,
       allMatches: rankedCards,
       explanation: exactMatch
-        ? `Found ${exactMatch.title} in ${targetLoc || 'Ahmedabad'} matching your criteria.`
+        ? (targetLoc ? `Found ${exactMatch.title} in ${targetLoc} matching your criteria.` : `Found ${exactMatch.title} matching your criteria.`)
         : 'Found verified properties matching your criteria.',
     };
   }

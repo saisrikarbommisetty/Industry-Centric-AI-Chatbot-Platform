@@ -40,6 +40,12 @@ export interface AIServiceResponse {
   source: 'openai' | 'fallback';
 }
 
+function truncateSafe(text: string | undefined | null, maxChars: number): string {
+  if (!text) return '';
+  if (text.length <= maxChars) return text;
+  return text.slice(0, maxChars) + '... [truncated]';
+}
+
 export class OpenAIService {
   private client: OpenAI | null = null;
   private modelName: string;
@@ -162,6 +168,9 @@ Return a valid JSON object matching this schema:
   "answerGuidance": string
 }`;
 
+      const safeHistory = truncateSafe(params.conversationHistorySummary, 3000);
+      const safeUserMsg = truncateSafe(params.userMessage, 1500);
+
       const userPrompt = `
 Current User State:
 - Name: ${state.userName || 'Unknown'}
@@ -172,9 +181,9 @@ Current User State:
 - Previously Displayed Cards: ${(state.displayedPropertyTitles || []).join(', ') || 'None'}
 
 Recent Conversation Context:
-${params.conversationHistorySummary || 'New conversation'}
+${safeHistory || 'New conversation'}
 
-User Message: "${params.userMessage}"
+User Message: "${safeUserMsg}"
 
 Respond with JSON.
 `.trim();
@@ -421,39 +430,46 @@ Respond with JSON.
       ])
     );
 
+    const botName = botConfig?.botName || 'our business';
+    const isPrycoons = botName.toLowerCase().includes('prycoons');
     const isRealEstate = botConfig?.isRealEstate !== undefined
       ? botConfig.isRealEstate
       : (botConfig?.industry === 'real-estate' || (!botConfig?.industry && !botConfig?.botName));
-    const botName = botConfig?.botName || 'our business';
+
+    // Token / Context Window Overflow Guard: strictly enforce safe bounds
+    // gpt-4o-mini max context is 128k tokens; keeping total input under ~25k chars (~6k tokens) guarantees no context overflow
+    const safeSystemPrompt = truncateSafe(systemPrompt, 12000);
+    const safeUserMessage = truncateSafe(userMessage, 3000);
+    const safeGroundedContext = truncateSafe(groundedContext, 10000);
 
     for (const mName of candidateModels) {
       try {
-        const hasKnowledge = groundedContext && groundedContext.trim().length > 10;
+        const hasKnowledge = safeGroundedContext && safeGroundedContext.trim().length > 10;
         const prompt = hasKnowledge
           ? `
 === USER QUERY ===
-${userMessage}
+${safeUserMessage}
 
 === VERIFIED RETRIEVED WEBSITE KNOWLEDGE ===
-${groundedContext}
+${safeGroundedContext}
 
 ${isRealEstate 
-  ? `Please respond concisely in 1-2 brief paragraphs (under 90 words) strictly based on the verified website knowledge above for ${botName}. Highlight top matching properties with bold names (e.g. **Ananta**).` 
+  ? `Please respond concisely in 1-2 brief paragraphs (under 90 words) strictly based on the verified website knowledge above for ${botName}.${isPrycoons ? ' Highlight top matching properties with bold names (e.g. **Ananta**).' : ' Highlight verified properties or services from the knowledge base.'}` 
   : `Answer the user's question directly, accurately, and concisely in 1-2 brief sentences (strictly under 60-70 words) based strictly on the verified website knowledge above for ${botName}. Get straight to the answer without lengthy preambles, do not dump bullet points or raw metadata labels, and do not repeat system descriptions. If the information is not in the knowledge base, state that simply in one sentence.`}
 Do NOT include raw source tags like [Source 1: ...].
 `.trim()
           : `
 === USER QUERY ===
-${userMessage}
+${safeUserMessage}
 
 Please answer the user's question clearly, warmly, and concisely (under 90 words).
-${isRealEstate ? 'Provide expert, helpful real estate guidance relevant to Ahmedabad and property buyers. Do not invent specific unverified property prices or availability.' : `Represent ${botName} professionally. If the user asks about specific business offerings, products, or services that require verified documentation, clearly state that this detail is not confirmed in your knowledge base.`}
+${isPrycoons ? 'Provide expert, helpful real estate guidance relevant to Ahmedabad and property buyers. Do not invent specific unverified property prices or availability.' : `Represent ${botName} professionally as an assistant in the ${botConfig?.industryName || botConfig?.industry || 'business'} industry. If the user asks about specific business offerings, products, or services that require verified documentation, clearly state that this detail is not confirmed in your knowledge base.`}
 `.trim();
 
         const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
           {
             role: 'system',
-            content: systemPrompt,
+            content: safeSystemPrompt,
           },
           {
             role: 'user',
@@ -488,6 +504,12 @@ ${isRealEstate ? 'Provide expert, helpful real estate guidance relevant to Ahmed
       } catch (error: any) {
         const errMsg = error?.message || 'Unknown OpenAI error';
         const status = error?.status || error?.statusCode;
+
+        // Context limit overflow guard: do not retry same model candidates if context length error
+        if (errMsg.toLowerCase().includes('maximum context length') || errMsg.toLowerCase().includes('reduce the length of the messages')) {
+          logger.warn(`OpenAI context length exceeded: ${errMsg}. Gracefully falling back to grounded responder.`);
+          break;
+        }
 
         // Authentication failure (401): invalid key, stop retrying models
         if (status === 401 || errMsg.toLowerCase().includes('incorrect api key') || errMsg.toLowerCase().includes('invalid api key')) {

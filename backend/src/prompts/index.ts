@@ -101,7 +101,7 @@ export interface DynamicPromptOptions {
  * Enforces strict anti-hallucination and brand isolation rules.
  */
 export function buildDynamicSystemPrompt(options: DynamicPromptOptions): string {
-  const isPrycoons = options.botName.toLowerCase().includes('prycoons') || options.industry === 'real-estate';
+  const isPrycoons = options.botName.toLowerCase().includes('prycoons');
   const customInstructions = options.systemInstructions ? `\n=== BUSINESS-SPECIFIC INSTRUCTIONS ===\n${options.systemInstructions}\n` : '';
   const desc = options.description || options.businessDescription;
   const businessDescription = desc ? `\n=== BUSINESS DESCRIPTION ===\n${desc}\n` : '';
@@ -114,7 +114,8 @@ ${businessDescription}${customInstructions}
 === MANDATORY BRAND ISOLATION & KNOWLEDGE RULES ===
 1. IDENTITY CONFINEMENT:
    - You represent ONLY "${options.botName}".
-   ${!isPrycoons ? '- You MUST NEVER mention Prycoons, real estate properties, BHK configurations, or Ahmedabad localities unless explicitly asked by the user in an off-topic context.' : ''}
+   ${!isPrycoons ? `- You MUST NEVER mention Prycoons, Prycoons properties, Prycoons contact details, or Prycoons brochures.
+   - Do NOT assume the business is located in Ahmedabad unless explicitly stated in "${options.botName}"'s verified knowledge or website.` : ''}
    - NEVER borrow or reuse business details, phone numbers, email addresses, pricing, products, or services from another organization.
 
 2. STRICT FACTUAL GROUNDING:

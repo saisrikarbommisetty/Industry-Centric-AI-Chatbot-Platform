@@ -97,8 +97,8 @@ export class ConversationService {
     const websiteUrl = project?.websiteUrl || (projectId.toLowerCase().includes('prycoons') ? 'https://prycoons.com/' : '');
 
     const isPrycoons = project
-      ? (project.id === 'prycoons' || project.slug === 'prycoons' || project.name.toLowerCase().includes('prycoons'))
-      : (projectId.toLowerCase().includes('prycoons') || projectId === 'default');
+      ? (project.id === 'prycoons' || project.slug === 'prycoons' || project.id === 'prycoons-ai' || project.slug === 'prycoons-ai' || project.name.toLowerCase().includes('prycoons'))
+      : (projectId.toLowerCase().includes('prycoons') || projectId === 'default' || projectId === 'prycoons-ai');
     const isRealEstate = (industry === 'real-estate' || industry === 'real_estate' || isPrycoons);
 
     const sessionId = session.id;
@@ -133,8 +133,11 @@ export class ConversationService {
       })
       .catch((err: any) => logger.warn(`Analytics trackEvent error: ${err.message}`));
 
-    // Multi-tenant & Multi-industry routing: non-real-estate bots use isolated general knowledge pipeline
-    if (!isRealEstate) {
+    // Multi-tenant & Brand Isolation Routing:
+    // ONLY the dedicated Prycoons bot uses the legacy hardcoded Ahmedabad real-estate flow.
+    // All other bots (including other real-estate brands like Claads, Lodha, Sobha, healthcare, education, retail, etc.)
+    // use the isolated knowledge pipeline strictly grounded in their own website and brand configuration.
+    if (!isPrycoons) {
       return this.processGeneralIndustryMessage({
         projectId: project ? project.id : projectId,
         sessionId,
@@ -1470,7 +1473,12 @@ Please respond to the user warmly, helpfully, and concisely (under 50 words). Pr
       projectId,
       userText,
       params.clientContext,
-      8
+      8,
+      {
+        industry,
+        botName: projectName,
+        websiteUrl: project?.websiteUrl,
+      }
     );
 
     // If hybrid retrieval found no chunks matching this specific query,
@@ -1490,7 +1498,7 @@ Please respond to the user warmly, helpfully, and concisely (under 50 words). Pr
         }));
       }
     }
-    const formattedContext = retrievalService.formatContextForPrompt(retrievedChunks);
+    const formattedContext = retrievalService.formatContextForPrompt(retrievedChunks, 3, { industry, botName: projectName });
 
     // 5. Fetch recent conversation history
     const recentDbMessages = await messageRepository.getRecentMessagesBySessionId(sessionId, 6);
@@ -1514,6 +1522,7 @@ Please respond to the user warmly, helpfully, and concisely (under 50 words). Pr
     });
 
     // 7. Generate Response using OpenAI or Grounded Fallback
+    const isRealEstateBrand = (industry === 'real-estate' || industry === 'real_estate');
     const aiResult = await openaiService.generateResponse(
       systemPrompt,
       userText,
@@ -1521,7 +1530,8 @@ Please respond to the user warmly, helpfully, and concisely (under 50 words). Pr
       {
         botName: projectName,
         industry: project?.industry,
-        isRealEstate: false,
+        industryName: project?.industryName || (isRealEstateBrand ? 'Real Estate & Property' : undefined),
+        isRealEstate: isRealEstateBrand,
         websiteUrl: project?.websiteUrl,
         systemInstructions: project?.systemInstructions,
         description: project?.description,
@@ -1529,7 +1539,18 @@ Please respond to the user warmly, helpfully, and concisely (under 50 words). Pr
     );
 
     const responseText = aiResult.text.replace(/\*{3,}/g, '**').trim();
-    const quickReplies = project?.suggestedQuestions?.slice(0, 3) || [];
+    const quickReplies = project?.suggestedQuestions?.slice(0, 3) || (isRealEstateBrand ? ['Explore properties 🏡', 'Pricing & Details 💰', 'Contact team 📞'] : []);
+
+    // Extract property cards from this bot's own retrieved chunks if it is a real-estate brand
+    let propertyCard: PropertyCardData | null = null;
+    let propertyCards: PropertyCardData[] = [];
+    if (isRealEstateBrand && retrievedChunks.length > 0) {
+      const matchRes = propertyMatcherService.matchProperties(retrievedChunks, {}, false);
+      if (matchRes.allMatches && matchRes.allMatches.length > 0) {
+        propertyCards = matchRes.allMatches.slice(0, 3);
+        propertyCard = propertyCards[0] || null;
+      }
+    }
 
     // 8. Save Assistant response & update session
     await saveUserMessagePromise;
@@ -1549,8 +1570,8 @@ Please respond to the user warmly, helpfully, and concisely (under 50 words). Pr
         content: responseText,
         metadata: {
           sources,
-          propertyCard: null,
-          propertyCards: [],
+          propertyCard,
+          propertyCards,
         },
       }),
       sessionRepository.updateSession(sessionId, {
@@ -1570,7 +1591,7 @@ Please respond to the user warmly, helpfully, and concisely (under 50 words). Pr
       retrievalRequired: true,
       retrievalStatus: retrievedChunks.length > 0 ? 'SUCCESS_WITH_RESULTS' : 'SUCCESS_WITH_NO_MATCHES',
       candidateCount: retrievedChunks.length,
-      finalResultCount: 0,
+      finalResultCount: propertyCards.length,
       durationMs: Date.now() - startTime,
     });
 
@@ -1581,8 +1602,8 @@ Please respond to the user warmly, helpfully, and concisely (under 50 words). Pr
       sources,
       suggestions: quickReplies,
       quickReplies,
-      propertyCard: null,
-      propertyCards: [],
+      propertyCard,
+      propertyCards,
       leadCaptureRequired: false,
       advisorConnected: false,
     };
