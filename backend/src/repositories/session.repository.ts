@@ -2,6 +2,7 @@ import { prisma, isDatabaseConnected } from '../config/database';
 import { ChatSessionMetadata } from '../types';
 import { logger } from '../utils/logger';
 import { getWelcomeMessageForSession } from '../config/greetings';
+import { projectRepository } from './project.repository';
 
 const memorySessions: Map<string, any> = new Map();
 
@@ -15,7 +16,19 @@ export class SessionRepository {
     sessionMetadata?: ChatSessionMetadata | Record<string, any>;
   }): Promise<any> {
     const id = data.id || `sess-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-    const welcome = getWelcomeMessageForSession(id);
+    
+    // Determine appropriate welcome message based on project
+    let welcome = data.sessionMetadata?.welcomeMessage;
+    if (!welcome) {
+      const isPrycoons = data.projectId === 'prycoons' || data.projectId.toLowerCase().includes('prycoons');
+      if (isPrycoons) {
+        welcome = getWelcomeMessageForSession(id);
+      } else {
+        const project = await projectRepository.findById(data.projectId) || await projectRepository.findBySlug(data.projectId);
+        welcome = project?.welcomeMessage || (project ? `Hello! Welcome to ${project.name}. How can I assist you today?` : 'Hello! How can I assist you today?');
+      }
+    }
+
     const sessionRecord = {
       id,
       projectId: data.projectId,
@@ -33,6 +46,10 @@ export class SessionRepository {
       startedAt: new Date(),
       lastActivityAt: new Date(),
     };
+
+    if (sessionRecord.sessionMetadata && !sessionRecord.sessionMetadata.welcomeMessage) {
+      sessionRecord.sessionMetadata.welcomeMessage = welcome;
+    }
 
     if (isDatabaseConnected) {
       try {

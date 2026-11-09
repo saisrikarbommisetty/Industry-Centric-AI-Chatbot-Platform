@@ -84,14 +84,24 @@ export class OpenAIService {
       pendingQuestion?: string;
       displayedPropertyTitles?: string[];
     };
+    botConfig?: {
+      botName?: string;
+      industry?: string;
+      industryName?: string;
+    };
   }): Promise<MessageInterpretation> {
     if (!this.client) {
-      return this.fallbackInterpretMessage(params.userMessage, params.currentUserState);
+      return this.fallbackInterpretMessage(params.userMessage, params.currentUserState, params.botConfig);
     }
 
     try {
       const state = params.currentUserState || {};
-      const systemPrompt = `You are the Conversational Intelligence Engine for Prycoons Real Estate Assistant in Ahmedabad, Gujarat, India.
+      const botName = params.botConfig?.botName || 'Prycoons Real Estate Assistant';
+      const industryName = params.botConfig?.industryName || 'Real Estate';
+      const isRealEstate = (params.botConfig?.industry === 'real-estate' || !params.botConfig) && params.botConfig?.industry !== 'healthcare' && params.botConfig?.industry !== 'education';
+
+      const systemPrompt = isRealEstate
+        ? `You are the Conversational Intelligence Engine for Prycoons Real Estate Assistant in Ahmedabad, Gujarat, India.
 Analyze the user message in the context of recent chat history and current user state.
 Return a valid JSON object matching this schema:
 {
@@ -136,7 +146,21 @@ Intent Classification Guidelines:
 - NEVER assume or default intent! If the user asks an advisory/comparison question (e.g., "Should I buy or rent?", "Is it better to buy or rent?", "Difference between buying and renting"), intent MUST BE NULL, and the main intent MUST be "GENERAL_QUESTION"!
 - NAME EXTRACTION: Extract "name" ONLY when user genuinely introduces themselves (e.g. "I am Rahul", "Rahul", "My name is Priya", "Call me Rahul"). If the user says "Call me Rahul", extract name: "Rahul", do NOT interpret the word "call" as a property search intent, and do NOT infer BUY or RENT.
 - NEVER extract words like "yes", "yeah", "yep", "sure", "ok", "okay", "fine", "no", "skip", "buy", "rent", "explore" as a name! If user says "yes" or answers affirmatively, name MUST be null, and intent should be "FLOW_ANSWER".
-- PREFERENCE UPDATES: If user changes a requirement (e.g. "Actually, show me 2BHK properties instead"), extract the updated criteria (bhk: "2 BHK") and classify intent as "PROPERTY_SEARCH".`;
+- PREFERENCE UPDATES: If user changes a requirement (e.g. "Actually, show me 2BHK properties instead"), extract the updated criteria (bhk: "2 BHK") and classify intent as "PROPERTY_SEARCH".`
+        : `You are the Conversational Intelligence Engine for ${botName} (${industryName}).
+Analyze the user message in the context of recent chat history and current conversation state.
+Return a valid JSON object matching this schema:
+{
+  "intent": "GENERAL_QUESTION" | "OUT_OF_SCOPE" | "GREETING" | "FLOW_ANSWER" | "LEAD_CAPTURE" | "CONVERSATION",
+  "extractedCriteria": {
+    "name": string | null,
+    "phone": string | null,
+    "email": string | null
+  },
+  "requiresDirectAnswer": boolean,
+  "requiresPropertyRetrieval": boolean,
+  "answerGuidance": string
+}`;
 
       const userPrompt = `
 Current User State:
@@ -206,9 +230,11 @@ Respond with JSON.
    */
   fallbackInterpretMessage(
     userMessage: string,
-    currentUserState?: any
+    currentUserState?: any,
+    botConfig?: { botName?: string; industry?: string; industryName?: string }
   ): MessageInterpretation {
     const tl = userMessage.toLowerCase().trim();
+    const isRealEstate = (botConfig?.industry === 'real-estate' || !botConfig) && botConfig?.industry !== 'healthcare' && botConfig?.industry !== 'education';
 
     // 1. Out of scope
     if (/\b(cricket|football|movie|movies|recipe|pizza|burger|python|code|debug|sing|joke|capital of)\b/i.test(tl)) {
@@ -235,7 +261,35 @@ Respond with JSON.
       };
     }
 
-    // 2. Property search more
+    // 1.6 Greeting
+    if (/^(hi|hello|hey|good morning|namaste)[\s!.]*$/i.test(tl)) {
+      return {
+        intent: 'GREETING',
+        extractedCriteria: {},
+        requiresDirectAnswer: true,
+        requiresPropertyRetrieval: false,
+      };
+    }
+
+    // If not a real estate bot, treat inquiries as knowledge questions or general conversation
+    if (!isRealEstate) {
+      if (candidateName) {
+        return {
+          intent: 'CONVERSATION',
+          extractedCriteria: { name: candidateName },
+          requiresDirectAnswer: true,
+          requiresPropertyRetrieval: false,
+        };
+      }
+      return {
+        intent: 'GENERAL_QUESTION',
+        extractedCriteria: {},
+        requiresDirectAnswer: true,
+        requiresPropertyRetrieval: true,
+      };
+    }
+
+    // 2. Property search more (real estate only)
     if (/\b(show me more|more options|other options|show more)\b/i.test(tl)) {
       return {
         intent: 'PROPERTY_SEARCH_MORE',
@@ -294,7 +348,7 @@ Respond with JSON.
 
     if (isSearchWord || tl.includes('explore other') || hasBhk || hasBuy || hasRent || locMatch) {
       const relaxBudget = tl.includes('explore other') || tl.includes('other properties');
-      const intentVal: 'buy' | 'rent' | undefined = hasRent ? 'rent' : hasBuy ? 'buy' : undefined;
+      const intentVal: 'buy' | 'rent' | undefined = hasRent ? 'rent' : (hasBuy || hasBhk || tl.includes('looking for') || tl.includes('looking')) ? 'buy' : undefined;
       return {
         intent: (isSearchWord || (hasBhk && locMatch)) ? 'PROPERTY_SEARCH' : 'FLOW_ANSWER',
         extractedCriteria: {
@@ -344,11 +398,16 @@ Respond with JSON.
     systemPrompt: string,
     userMessage: string,
     groundedContext: string = '',
-    temperature = 0.2
+    temperatureOrConfig?: number | { botName?: string; industry?: string; industryName?: string; isRealEstate?: boolean },
+    botConfigArg?: { botName?: string; industry?: string; industryName?: string; isRealEstate?: boolean }
   ): Promise<AIServiceResponse> {
+    const temperature = typeof temperatureOrConfig === 'number' ? temperatureOrConfig : 0.2;
+    const resolvedBotConfig = (typeof temperatureOrConfig === 'object' && temperatureOrConfig !== null ? temperatureOrConfig : botConfigArg) as any;
+    const botConfig = resolvedBotConfig;
+
     if (!this.client) {
       return {
-        text: this.generateGroundedFallback(userMessage, groundedContext),
+        text: this.generateGroundedFallback(userMessage, groundedContext, botConfig),
         source: 'fallback',
       };
     }
@@ -362,6 +421,11 @@ Respond with JSON.
       ])
     );
 
+    const isRealEstate = botConfig?.isRealEstate !== undefined
+      ? botConfig.isRealEstate
+      : (botConfig?.industry === 'real-estate' || (!botConfig?.industry && !botConfig?.botName));
+    const botName = botConfig?.botName || 'our business';
+
     for (const mName of candidateModels) {
       try {
         const hasKnowledge = groundedContext && groundedContext.trim().length > 10;
@@ -373,17 +437,17 @@ ${userMessage}
 === VERIFIED RETRIEVED WEBSITE KNOWLEDGE ===
 ${groundedContext}
 
-Please respond to the user concisely in 1-2 brief paragraphs (under 90 words) based on the verified website knowledge above. 
-Highlight top matching properties with bold names (e.g. **Ananta**, **Satyamev Serene**). 
-Interactive cards will display full details below, so keep this text crisp and inviting without reproducing a large bullet list. Do NOT include raw source tags like [Source 1: ...].
+${isRealEstate 
+  ? `Please respond concisely in 1-2 brief paragraphs (under 90 words) strictly based on the verified website knowledge above for ${botName}. Highlight top matching properties with bold names (e.g. **Ananta**).` 
+  : `Answer the user's question directly, accurately, and concisely in 1-2 brief sentences (strictly under 60-70 words) based strictly on the verified website knowledge above for ${botName}. Get straight to the answer without lengthy preambles, do not dump bullet points or raw metadata labels, and do not repeat system descriptions. If the information is not in the knowledge base, state that simply in one sentence.`}
+Do NOT include raw source tags like [Source 1: ...].
 `.trim()
           : `
 === USER QUERY ===
 ${userMessage}
 
 Please answer the user's question clearly, warmly, and concisely (under 90 words).
-Provide expert, helpful real estate guidance relevant to Ahmedabad and property buyers.
-Do not invent specific unverified property prices or availability.
+${isRealEstate ? 'Provide expert, helpful real estate guidance relevant to Ahmedabad and property buyers. Do not invent specific unverified property prices or availability.' : `Represent ${botName} professionally. If the user asks about specific business offerings, products, or services that require verified documentation, clearly state that this detail is not confirmed in your knowledge base.`}
 `.trim();
 
         const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
@@ -443,7 +507,7 @@ Do not invent specific unverified property prices or availability.
     }
 
     return {
-      text: this.generateGroundedFallback(userMessage, groundedContext),
+      text: this.generateGroundedFallback(userMessage, groundedContext, botConfig),
       source: 'fallback',
     };
   }
@@ -451,8 +515,99 @@ Do not invent specific unverified property prices or availability.
   /**
    * Resilient, beautifully formatted fallback response generator when AI provider is unavailable
    */
-  generateGroundedFallback(userMessage: string, groundedContext: string): string {
+  generateGroundedFallback(
+    userMessage: string,
+    groundedContext: string,
+    botConfig?: { botName?: string; industry?: string; industryName?: string; isRealEstate?: boolean }
+  ): string {
     const msg = userMessage.toLowerCase();
+    const isRealEstate = botConfig?.isRealEstate !== undefined
+      ? botConfig.isRealEstate
+      : (botConfig?.industry === 'real-estate' || (!botConfig?.industry && !botConfig?.botName));
+    const botName = botConfig?.botName || 'our business';
+
+    // Multi-Industry Grounded Fallback for non-real-estate bots
+    if (!isRealEstate) {
+      if (groundedContext && groundedContext.trim().length > 10) {
+        // 1. Clean away [Source ...] headers
+        const rawLines = groundedContext
+          .replace(/\[Source\s+\d+:[^\]]+\]/gi, '')
+          .split('\n')
+          .map((l) => l.trim())
+          .filter((l) => l.length > 5 && !l.startsWith('---') && !/Under Construction|GandhinagarProperty/i.test(l));
+
+        // 2. Filter out raw system labels and extract informative factual statements
+        const informativeLines = rawLines
+          .filter((l) => !/^(Assistant Identity & Business Name|Industry & Domain|Operating Instructions & Guidelines):/i.test(l))
+          .map((l) => l.replace(/^(Business Overview & Services|Overview & Services|Business Information|Services & Policies|Official Website):\s*/i, '').trim())
+          .filter(Boolean);
+
+        // 3. Extract query search terms (ignoring common stop words)
+        const stopWords = new Set(['what', 'is', 'the', 'of', 'in', 'for', 'and', 'or', 'a', 'an', 'to', 'your', 'our', 'are', 'you', 'can', 'i', 'me', 'how', 'do', 'does', 'tell', 'about', 'give', 'any']);
+        const queryTerms = msg.replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter((w) => w.length > 2 && !stopWords.has(w));
+
+        const isPriceQuery = /\b(price|pricing|cost|fee|fees|charges|rate|how much)\b/i.test(msg);
+        const isTimeQuery = /\b(time|timing|hours|hour|schedule|open|close|when|days)\b/i.test(msg);
+        const isServiceQuery = /\b(services?|treatment|treatments?|offer|product|what do you do)\b/i.test(msg);
+        const isContactQuery = /\b(contact|email|phone|call|reach|number|address|where|location)\b/i.test(msg);
+
+        // Score each informative sentence
+        const scoredLines = informativeLines.map((line) => {
+          let score = 0;
+          const lineLower = line.toLowerCase();
+          for (const t of queryTerms) {
+            if (lineLower.includes(t)) score += 4;
+          }
+          if (isPriceQuery && (line.includes('₹') || line.includes('$') || /\b(cost|price|fee|pricing|charges)\b/i.test(lineLower))) {
+            score += 6;
+          }
+          if (isTimeQuery && /\b(\d{1,2}(?::\d{2})?\s*(?:am|pm)|hours|timing|schedule|monday|sunday|saturday|daily)\b/i.test(lineLower)) {
+            score += 6;
+          }
+          if (isServiceQuery && /\b(provides|offers|treatment|surgery|service|care|solutions|programs)\b/i.test(lineLower)) {
+            score += 4;
+          }
+          if (isContactQuery && /\b(https?:\/\/|@|phone|call|\+\d{2}|\b\d{10}\b|located|address)\b/i.test(lineLower)) {
+            score += 5;
+          }
+          return { line, score };
+        });
+
+        scoredLines.sort((a, b) => b.score - a.score);
+        const bestMatches = scoredLines.filter((sl) => sl.score > 0);
+
+        if (bestMatches.length > 0) {
+          // Return the 1-2 most relevant matching statements directly without lengthy filler
+          const topLines = bestMatches.slice(0, 2).map((m) => m.line);
+          const directAnswer = topLines.join(' ');
+          return `Based on our verified website records:\n\n${directAnswer}`;
+        }
+
+        // If general query and we have informative lines, output concise overview (under 50 words)
+        if (informativeLines.length > 0) {
+          const overview = informativeLines.slice(0, 2).join(' ');
+          return `At ${botName}, ${overview}`;
+        }
+      }
+
+      if (msg.includes('hi') || msg.includes('hello') || msg.includes('hey')) {
+        return `Hi there 👋 Welcome to ${botName}! How can I assist you with your questions today?`;
+      }
+
+      if (/\b(contact|email|phone|call|reach|number|helpdesk)\b/i.test(msg)) {
+        return `You can reach ${botName} through our official website, or share your contact number/email so our team can follow up with you directly.`;
+      }
+
+      if (/\b(help|assist|what can you do|services)\b/i.test(msg)) {
+        return `I can assist with questions regarding ${botName}'s services, pricing, and information based on verified records. What would you like to know?`;
+      }
+
+      if (/\b(thank|thanks|great|cool|awesome|perfect|ok|okay)\b/i.test(msg)) {
+        return `You're very welcome! Feel free to ask if you have any other questions about ${botName}.`;
+      }
+
+      return `I couldn't find confirmed details for that in the verified records for ${botName}. Would you like our team to contact you directly with more information?`;
+    }
 
     // Check if grounded context contains property details
     if (groundedContext && groundedContext.trim().length > 20) {

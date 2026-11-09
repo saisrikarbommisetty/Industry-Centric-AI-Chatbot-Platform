@@ -145,22 +145,52 @@ export class ProjectRepository {
   async create(data: any): Promise<any> {
     const id = data.id || `proj-${Date.now()}`;
     const slug = data.slug || id;
-    const projectRecord = { ...data, id, slug, createdAt: new Date(), updatedAt: new Date() };
+
+    // Sanitize data to strictly match columns on Prisma Project model
+    const projectDbRecord = {
+      id,
+      name: String(data.name || 'AI Assistant'),
+      slug: String(slug),
+      industry: String(data.industry || 'real-estate'),
+      industryName: String(data.industryName || 'Real Estate & Property'),
+      websiteUrl: String(data.websiteUrl || 'https://domain.local'),
+      description: data.description ? String(data.description) : null,
+      systemInstructions: data.systemInstructions ? String(data.systemInstructions) : null,
+      avatar: data.avatar ? String(data.avatar) : '🏢',
+      primaryColor: data.primaryColor ? String(data.primaryColor) : '#C85C4A',
+      tone: data.tone ? String(data.tone) : 'Warm, Consultative & Friendly',
+      welcomeMessage: data.welcomeMessage ? String(data.welcomeMessage) : null,
+      suggestedQuestions: Array.isArray(data.suggestedQuestions) ? data.suggestedQuestions.map(String) : [],
+      leadCaptureEnabled: data.leadCaptureEnabled !== undefined ? Boolean(data.leadCaptureEnabled) : true,
+      leadCaptureFields: Array.isArray(data.leadCaptureFields) ? data.leadCaptureFields.map(String) : ['name', 'phone', 'email'],
+      isActive: data.isActive !== undefined ? Boolean(data.isActive) : true,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    const fullProjectRecord = {
+      ...projectDbRecord,
+      businessName: data.businessName || data.name,
+      initialSources: data.initialSources || [],
+    };
 
     if (isDatabaseConnected) {
       try {
-        return await prisma.project.upsert({
+        const saved = await prisma.project.upsert({
           where: { id },
-          update: projectRecord,
-          create: projectRecord,
+          update: projectDbRecord,
+          create: projectDbRecord,
         });
+        memoryProjects.set(id, { ...fullProjectRecord, ...saved });
+        memoryProjects.set(slug, { ...fullProjectRecord, ...saved });
+        return { ...fullProjectRecord, ...saved };
       } catch (err: any) {
         logger.warn(`Database project create failed: ${err.message}. Saving to memory.`);
       }
     }
-    memoryProjects.set(id, projectRecord);
-    memoryProjects.set(slug, projectRecord);
-    return projectRecord;
+    memoryProjects.set(id, fullProjectRecord);
+    memoryProjects.set(slug, fullProjectRecord);
+    return fullProjectRecord;
   }
 
   async update(id: string, updates: any): Promise<any> {

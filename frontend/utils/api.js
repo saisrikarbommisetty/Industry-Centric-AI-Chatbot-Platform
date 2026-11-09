@@ -87,6 +87,25 @@ export const api = {
       request(`/api/chat/project/${projectId}/sessions`),
   },
 
+  projects: {
+    list: () => request('/api/projects'),
+    get: (id) => request(`/api/projects/${id}`),
+    create: (data) =>
+      request('/api/projects', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+    update: (id, data) =>
+      request(`/api/projects/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify(data),
+      }),
+    delete: (id) =>
+      request(`/api/projects/${id}`, {
+        method: 'DELETE',
+      }),
+  },
+
   leads: {
     createLead: (leadData) =>
       request('/api/leads', {

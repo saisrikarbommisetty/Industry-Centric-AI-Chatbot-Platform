@@ -281,8 +281,11 @@ export const PublicChatPreview = () => {
 
         // If savedSessionId exists but no messages in database yet (e.g. refreshed right after opening):
         // Restore the SAME session with the consistent welcome message selected for this session ID
-        const welcomeKey = `prycoons_welcome_${currentBot?.id}_${savedSessionId}`;
-        const savedWelcomeText = localStorage.getItem(welcomeKey) || getWelcomeMessageForSession(savedSessionId);
+        const welcomeKey = `bot_welcome_${currentBot?.id}_${savedSessionId}`;
+        const defaultWelcome = (currentBot?.id === 'prycoons-ai' || currentBot?.name?.toLowerCase().includes('prycoons'))
+          ? getWelcomeMessageForSession(savedSessionId)
+          : (currentBot?.welcomeMessage || `Welcome to ${currentBot?.name || 'our assistant'}! How can we help you today?`);
+        const savedWelcomeText = localStorage.getItem(welcomeKey) || defaultWelcome;
         const restoredSession = createInitialSession(currentBot, savedSessionId);
         restoredSession.welcomeMessage = savedWelcomeText;
         restoredSession.initialMessage.text = savedWelcomeText;
@@ -301,7 +304,7 @@ export const PublicChatPreview = () => {
       sessionRef.current = freshSession;
       const newSessionId = freshSession.id || freshSession.sessionId;
       localStorage.setItem(sessionKey, newSessionId);
-      localStorage.setItem(`prycoons_welcome_${currentBot?.id}_${newSessionId}`, freshSession.welcomeMessage || freshSession.initialMessage.text);
+      localStorage.setItem(`bot_welcome_${currentBot?.id}_${newSessionId}`, freshSession.welcomeMessage || freshSession.initialMessage.text);
       if (!isCancelled) {
         setMessages([freshSession.initialMessage]);
       }
@@ -749,6 +752,7 @@ export const PublicChatPreview = () => {
     const sessionKey = `brim_chat_session_${currentBot?.id}`;
     const oldSessionId = localStorage.getItem(sessionKey);
     if (oldSessionId) {
+      localStorage.removeItem(`bot_welcome_${currentBot?.id}_${oldSessionId}`);
       localStorage.removeItem(`prycoons_welcome_${currentBot?.id}_${oldSessionId}`);
     }
     localStorage.removeItem(sessionKey);
@@ -758,7 +762,7 @@ export const PublicChatPreview = () => {
     sessionRef.current = freshSession;
     const newSessionId = freshSession.id || freshSession.sessionId;
     localStorage.setItem(sessionKey, newSessionId);
-    localStorage.setItem(`prycoons_welcome_${currentBot?.id}_${newSessionId}`, freshSession.welcomeMessage || freshSession.initialMessage.text);
+    localStorage.setItem(`bot_welcome_${currentBot?.id}_${newSessionId}`, freshSession.welcomeMessage || freshSession.initialMessage.text);
 
     setMessages([freshSession.initialMessage]);
     setActiveLeadForm(false);

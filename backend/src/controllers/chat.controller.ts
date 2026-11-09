@@ -100,6 +100,8 @@ export class ChatController {
   async getProjectSessions(req: Request, res: Response, next: NextFunction) {
     try {
       const projectId = req.params.projectId || (req.query.projectId as string) || 'prycoons-ai';
+      const project = await projectRepository.findById(projectId) || await projectRepository.findBySlug(projectId);
+      const dynamicBotName = project?.name || (projectId.toLowerCase().includes('prycoons') ? 'Prycoons Real Estate Assistant' : 'AI Assistant');
       const sessions = await sessionRepository.getSessionsByProjectId(projectId);
       const allProjectLeads = await leadRepository.getLeadsByProjectId(projectId);
       const leadMap = new Map<string, any>();
@@ -123,12 +125,12 @@ export class ChatController {
         }));
 
         const firstUserMsg = messages.find((m: any) => m.sender === 'user')?.text || '';
-        const interest = meta.discovery?.homeType || meta.discovery?.location || firstUserMsg.slice(0, 35) || 'Property Inquiry';
+        const interest = meta.discovery?.homeType || meta.discovery?.location || firstUserMsg.slice(0, 35) || 'Inquiry';
 
         return {
           id: s.id,
           botId: s.projectId,
-          botName: 'Prycoons Real Estate Assistant',
+          botName: dynamicBotName,
           userName: candidateName,
           userEmail: meta.lead?.email || associatedLead?.email || 'visitor@example.com',
           userPhone: candidatePhone || 'Not provided',

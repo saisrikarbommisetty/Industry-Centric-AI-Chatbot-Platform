@@ -152,8 +152,10 @@ export const getWelcomeMessageForSession = (sessionId = '') => {
 export const createInitialSession = (bot = null, customSessionId = null) => {
   const timeCtx = getTimeContext();
   const botName = bot?.name || 'Prycoons Real Estate Assistant';
-  const isRealEstate = !bot || bot.industryId === 'real-estate' || bot.id === 'prycoons-ai';
-  const isMarketing = bot?.industryId === 'marketing' || bot?.industryId === 'ecommerce' || bot?.id?.includes('brand') || bot?.id?.includes('market');
+  const botBusinessName = bot?.businessName || botName;
+  const isPrycoons = !bot || bot.id === 'prycoons-ai' || bot.name?.toLowerCase().includes('prycoons');
+  const isRealEstate = (bot?.industryId === 'real-estate' || bot?.industry === 'real-estate' || isPrycoons);
+  const isApex = bot?.id === 'apex-brand-ai';
 
   const sessionId = customSessionId || ('sess-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7));
 
@@ -164,12 +166,14 @@ export const createInitialSession = (bot = null, customSessionId = null) => {
     // Dynamic single-sentence welcome message representing Prycoons Real Estate
     initialText = getWelcomeMessageForSession(sessionId);
     initialQuickReplies = ['Looking to Buy 🏡', 'Thinking of Renting 🔑', 'Just Exploring ✨'];
-  } else if (isMarketing) {
+  } else if (isApex) {
     initialText = "Hi there! Welcome to Apex Brand Studio. How can we assist your brand today?";
     initialQuickReplies = ['Brand identity & logo 🎨', 'Website & UX design 💻', 'Social media growth 📈'];
   } else {
-    initialText = bot?.welcomeMessage || `Welcome to ${botName}! How can we help you today?`;
-    initialQuickReplies = bot?.suggestedQuestions || ['Looking to Buy 🏡', 'Thinking of Renting 🔑', 'Just Exploring ✨'];
+    initialText = bot?.welcomeMessage || `Welcome to ${botBusinessName}! How can we help you today?`;
+    initialQuickReplies = (bot?.suggestedQuestions && bot.suggestedQuestions.length > 0)
+      ? bot.suggestedQuestions
+      : ['Learn about our services', 'Operating hours & info', 'Contact our team'];
   }
 
   return {
@@ -370,11 +374,15 @@ export const processUserMessage = (userText, session, bot) => {
   const text = (userText || '').trim();
   const textLower = text.toLowerCase();
   const timeCtx = getTimeContext();
-  const botName = bot?.name || 'Prycoons Assistant';
-  const isMarketing = bot?.industryId === 'marketing' || bot?.industryId === 'ecommerce' || bot?.id?.includes('brand') || bot?.id?.includes('market');
-  const isEducation = bot?.industryId === 'education';
-  const isHealthcare = bot?.industryId === 'healthcare';
-  const isHospitality = bot?.industryId === 'hospitality';
+  const botName = bot?.name || 'Prycoons Real Estate Assistant';
+  const botBusinessName = bot?.businessName || botName;
+  const isPrycoons = !bot || bot.id === 'prycoons-ai' || bot.name?.toLowerCase().includes('prycoons');
+  const isRealEstate = (bot?.industryId === 'real-estate' || bot?.industry === 'real-estate' || isPrycoons);
+  const isApex = bot?.id === 'apex-brand-ai';
+  const isMarketing = !isRealEstate && isApex;
+  const isEducation = !isRealEstate && bot?.industryId === 'education';
+  const isHealthcare = !isRealEstate && bot?.industryId === 'healthcare';
+  const isHospitality = !isRealEstate && bot?.industryId === 'hospitality';
 
   let nextState = session.state;
   let replyText = '';
@@ -458,13 +466,19 @@ export const processUserMessage = (userText, session, bot) => {
       quickReplies = ['Undergraduate B.Tech / BBA', 'Postgraduate MBA / M.Tech', 'Scholarship eligibility', 'Campus visit booking'];
       nextState = 'EDUCATION_INTENT';
     } else if (isHealthcare) {
-      replyText = `Hello${userNameStr} 🩺.\n\n${timeCtx.icebreaker}\n\nHow can CarePoint Clinic assist you today?`;
-      quickReplies = ['Book doctor appointment', 'Consultation clinic hours', 'Cardiology & OPD', 'General enquiry'];
+      replyText = `Hello${userNameStr} 🩺.\n\n${timeCtx.icebreaker}\n\nHow can ${botBusinessName} assist you today?`;
+      quickReplies = ['Book doctor appointment', 'Consultation clinic hours', 'Specialties & OPD', 'General enquiry'];
       nextState = 'HEALTHCARE_INTENT';
     } else if (isHospitality) {
-      replyText = `A warm welcome to LuxeStay Palace${userNameStr}! 🛎️\n\n${timeCtx.icebreaker}\n\nAre you planning a leisure holiday getaway, a private weekend villa stay, or fine dining?`;
+      replyText = `A warm welcome to ${botBusinessName}${userNameStr}! 🛎️\n\n${timeCtx.icebreaker}\n\nAre you planning a leisure holiday getaway, a private weekend villa stay, or fine dining?`;
       quickReplies = ['Luxury Suite / Villa stay', 'Weekend getaway packages', 'Fine dining reservations', 'Spa & wellness'];
       nextState = 'HOSPITALITY_INTENT';
+    } else if (!isRealEstate) {
+      replyText = `Hello${userNameStr}! 👋\n\nWelcome to ${botBusinessName}. How can I assist you with our services, products, or information today?`;
+      quickReplies = bot?.suggestedQuestions && bot.suggestedQuestions.length > 0
+        ? bot.suggestedQuestions.slice(0, 3)
+        : ['What services do you offer?', 'Pricing & Details', 'Speak with our team'];
+      nextState = 'GENERAL_DISCOVERY';
     } else {
       // REAL ESTATE DEFAULT
       if (session.userName) {
@@ -478,6 +492,34 @@ export const processUserMessage = (userText, session, bot) => {
       }
       quickReplies = ['Looking to Buy 🏡', 'Thinking of Renting 🔑', 'Just Exploring ✨'];
       nextState = 'INTENT_DETECTION';
+    }
+  }
+
+  // =========================================================================
+  // 1B. GENERAL INDUSTRY INQUIRY & DISCOVERY STAGE (NON-REAL-ESTATE)
+  // =========================================================================
+  else if (session.state === 'GENERAL_DISCOVERY') {
+    const isContactQuestion = /\b(contact|email|phone|call|number|reach|address|location|support)\b/i.test(textLower);
+    const isServiceQuestion = /\b(services|service|offer|features|what do you do|help|products|pricing|cost|plans)\b/i.test(textLower);
+
+    if (foundPhone || foundEmail) {
+      replyText = `Thank you${session.userName ? `, ${session.userName}` : ''}! I have noted your contact information. Our team at ${botBusinessName} will reach out to assist you shortly. Is there anything specific you would like to know?`;
+      quickReplies = bot?.suggestedQuestions?.slice(0, 3) || ['Product Details', 'Schedule Consultation'];
+      nextState = 'COMPLETED';
+    } else if (isContactQuestion) {
+      replyText = `You can reach ${botBusinessName} via our official website at ${bot?.websiteUrl || 'our portal'}. Would you like our representative to contact you directly? Please share your phone number or email.`;
+      quickReplies = ['Leave phone number 📱', 'Leave email ✉️', 'Browse services'];
+      nextState = 'LEAD_PHONE';
+    } else if (isServiceQuestion) {
+      const desc = bot?.description || `We provide specialized solutions and support for our clients.`;
+      replyText = `At ${botBusinessName}, ${desc}\n\nFeel free to ask any specific questions, or let me know if you would like to connect with a representative!`;
+      quickReplies = bot?.suggestedQuestions?.slice(0, 3) || ['Pricing & Plans', 'Contact Team', 'Get Started'];
+      nextState = 'GENERAL_DISCOVERY';
+    } else {
+      const desc = bot?.description || `We are dedicated to assisting our visitors with comprehensive information and guidance.`;
+      replyText = `At ${botBusinessName}, ${desc}\n\nHow can I help you with our services today?`;
+      quickReplies = bot?.suggestedQuestions?.slice(0, 3) || ['Speak with Specialist 📞', 'More Information ℹ️'];
+      nextState = 'GENERAL_DISCOVERY';
     }
   }
 
@@ -836,14 +878,19 @@ export const processUserMessage = (userText, session, bot) => {
   // 14. HUMAN ADVISOR CONNECTION
   // =========================================================================
   else if (session.state === 'HUMAN_ADVISOR') {
+    const isPrycoons = !bot || bot.id === 'prycoons-ai' || bot.name?.toLowerCase().includes('prycoons');
     if (textLower.includes('connect') || textLower.includes('advisor') || textLower.includes('call') || textLower.includes('yes')) {
       advisorConnected = true;
       session.engagement.advisorConnected = true;
-      replyText = `🎉 Wonderful! Our property team has received your request.\n\nThey will reach out on **${session.lead.phone || 'your phone number'}** at your convenience. Thank you for chatting with Prycoons Real Estate! Have a fantastic day ahead ✨.`;
+      replyText = isPrycoons
+        ? `🎉 Wonderful! Our property team has received your request.\n\nThey will reach out on **${session.lead.phone || 'your phone number'}** at your convenience. Thank you for chatting with Prycoons Real Estate! Have a fantastic day ahead ✨.`
+        : `🎉 Wonderful! Our team has received your request.\n\nThey will reach out on **${session.lead.phone || 'your phone number'}** at your convenience. Thank you for chatting with ${botName}! Have a fantastic day ahead ✨.`;
     } else {
-      replyText = `No worries at all 😊. I’ll send your brochure and shortlist over WhatsApp. You can also reach our official contact desk anytime at **+91 7861072811** or **admin@prycoons.com**.\n\nHave a wonderful day ahead! 🌟`;
+      replyText = isPrycoons
+        ? `No worries at all 😊. I’ll send your brochure and shortlist over WhatsApp. You can also reach our official contact desk anytime at **+91 7861072811** or **admin@prycoons.com**.\n\nHave a wonderful day ahead! 🌟`
+        : `No worries at all 😊. Feel free to reach out anytime if you have questions. Have a wonderful day ahead! 🌟`;
     }
-    quickReplies = ['Explore another project', 'Restart conversation 🔄'];
+    quickReplies = isPrycoons ? ['Explore another project', 'Restart conversation 🔄'] : ['Ask another question', 'Restart conversation 🔄'];
     nextState = 'COMPLETED';
   }
 
@@ -970,6 +1017,19 @@ export const processUserMessage = (userText, session, bot) => {
 export const getInactivityFollowUp = (session) => {
   if (session.inactivityFollowUpSent) return null;
   session.inactivityFollowUpSent = true;
+
+  const isRealEstate = session.industryId === 'real-estate' || session.botId === 'prycoons-ai';
+
+  if (!isRealEstate) {
+    const greetingName = session.userName ? `${session.userName}, ` : '';
+    return {
+      id: 'bot-inactivity-' + Date.now(),
+      sender: 'bot',
+      text: `No rush 😊 ${greetingName}Feel free to ask any other questions or let me know if you would like to connect with our team!`,
+      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      quickReplies: ['Ask a question ❓', 'Contact our team 📞', 'More details ℹ️']
+    };
+  }
 
   let chosenText = 'No rush 😊 Would you like to explore properties or speak with an advisor?';
   if (session.discovery?.location) {

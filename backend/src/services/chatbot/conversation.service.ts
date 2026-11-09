@@ -15,7 +15,7 @@ import { openaiService } from '../ai/openai.service';
 import { locationService } from '../location/location.service';
 import { leadService } from '../leads/lead.service';
 import { analyticsService } from '../analytics/analytics.service';
-import { GROUNDED_CHATBOT_SYSTEM_PROMPT, MARKETING_AGENCY_SYSTEM_PROMPT } from '../../prompts';
+import { GROUNDED_CHATBOT_SYSTEM_PROMPT, MARKETING_AGENCY_SYSTEM_PROMPT, buildDynamicSystemPrompt } from '../../prompts';
 import { localityDiscoveryService } from '../crawler/localityDiscovery.service';
 import { logger } from '../../utils/logger';
 import { OFFICIAL_PRYCOONS_CONTACT } from '../../config/organization';
@@ -92,9 +92,14 @@ export class ConversationService {
     })();
 
     const [project, session] = await Promise.all([projectPromise, sessionPromise]);
-    const projectName = project?.name || 'Prycoons Real Estate Assistant';
-    const industry = project?.industry || 'real-estate';
-    const websiteUrl = project?.websiteUrl || 'https://prycoons.com/';
+    const projectName = project?.name || (projectId.toLowerCase().includes('prycoons') ? 'Prycoons Real Estate Assistant' : 'AI Assistant');
+    const industry = (project?.industry || (projectId.toLowerCase().includes('prycoons') ? 'real-estate' : 'general')).toLowerCase();
+    const websiteUrl = project?.websiteUrl || (projectId.toLowerCase().includes('prycoons') ? 'https://prycoons.com/' : '');
+
+    const isPrycoons = project
+      ? (project.id === 'prycoons' || project.slug === 'prycoons' || project.name.toLowerCase().includes('prycoons'))
+      : (projectId.toLowerCase().includes('prycoons') || projectId === 'default');
+    const isRealEstate = (industry === 'real-estate' || industry === 'real_estate' || isPrycoons);
 
     const sessionId = session.id;
     let metadata: ChatSessionMetadata = session.sessionMetadata || {
@@ -128,6 +133,24 @@ export class ConversationService {
       })
       .catch((err: any) => logger.warn(`Analytics trackEvent error: ${err.message}`));
 
+    // Multi-tenant & Multi-industry routing: non-real-estate bots use isolated general knowledge pipeline
+    if (!isRealEstate) {
+      return this.processGeneralIndustryMessage({
+        projectId: project ? project.id : projectId,
+        sessionId,
+        userText,
+        textLower,
+        project,
+        session,
+        metadata,
+        saveUserMessagePromise,
+        requestId,
+        startTime,
+        clientContext: params.clientContext,
+        headers: params.headers,
+      });
+    }
+
     // 3. Extract Entities & Update Structured Conversation Memory
     this.extractAndStoreMemory(userText, metadata);
 
@@ -149,8 +172,8 @@ export class ConversationService {
       timeZone: clientTimeZone,
     });
 
-    // 5. Geographic Scope Check: Strictly enforce Ahmedabad-only support
-    const geoScope = localityDiscoveryService.isOutsideAhmedabad(userText);
+    // 5. Geographic Scope Check: Strictly enforce Ahmedabad-only support for Prycoons
+    const geoScope = isPrycoons ? localityDiscoveryService.isOutsideAhmedabad(userText) : { isOutside: false, city: null };
     if (geoScope.isOutside) {
       const responseText = "I’m currently helping with properties in Ahmedabad only. 😊 Would you like me to find properties in Ahmedabad instead?";
       const quickReplies = ['Explore Ahmedabad 🏡', 'Properties in Gota', 'Properties in Bodakdev'];
@@ -259,7 +282,7 @@ export class ConversationService {
                            /(?:prycoons?|official)\s+(?:phone|mobile|contact\s+number)/i.test(userText);
     const isGeneralContactQuestion = /(?:how\s+(?:can|do)\s+i\s+contact|contact\s+prycoons|reach\s+prycoons|connect\s+with\s+prycoons|speak\s+to\s+someone|speak\s+with\s+(?:an?\s+)?advisor|talk\s+to\s+(?:an?\s+)?advisor|contact\s+details|contact\s+info)/i.test(userText);
 
-    if (isEmailQuestion || isPhoneQuestion || isGeneralContactQuestion) {
+    if ((isEmailQuestion || isPhoneQuestion || isGeneralContactQuestion) && isPrycoons) {
       let contactReply = '';
       if (isEmailQuestion && !isPhoneQuestion) {
         contactReply = `You can reach Prycoons via our official email at **${OFFICIAL_PRYCOONS_CONTACT.email}**.\n\nOur team typically responds within 2 business hours. Would you like me to help you schedule a site visit or explore properties in Ahmedabad?`;
@@ -1272,6 +1295,295 @@ Please respond to the user warmly, helpfully, and concisely (under 50 words). Pr
       propertyCards,
       leadCaptureRequired,
       advisorConnected,
+    };
+  }
+
+  /**
+   * Process incoming messages for general / non-real-estate industry bots
+   * Strictly isolates knowledge, identity, and conversation flow to the specific bot.
+   */
+  private async processGeneralIndustryMessage(params: {
+    projectId: string;
+    sessionId: string;
+    userText: string;
+    textLower: string;
+    project: any;
+    session: any;
+    metadata: ChatSessionMetadata;
+    saveUserMessagePromise: Promise<any>;
+    requestId: string;
+    startTime: number;
+    clientContext?: any;
+    headers?: Record<string, string | string[] | undefined>;
+  }): Promise<ChatResponsePayload> {
+    const { projectId, sessionId, userText, textLower, project, metadata, saveUserMessagePromise, requestId, startTime } = params;
+    const projectName = project?.name || 'AI Assistant';
+    const industry = project?.industryName || project?.industry || 'General';
+
+    // 1. Check for declining responses
+    if (isDecliningResponse(userText)) {
+      metadata.lead.phoneDeclined = true;
+      metadata.lead.nameDeclined = true;
+      metadata.lead.awaitingPhone = false;
+      metadata.lead.awaitingName = false;
+      const declineAck = "No problem at all! Feel free to ask any questions about our products, services, or information.";
+      const quickReplies = project?.suggestedQuestions?.slice(0, 3) || [];
+
+      await saveUserMessagePromise;
+      metadata.stepIndex += 1;
+      await Promise.all([
+        messageRepository.createMessage({
+          sessionId,
+          role: 'ASSISTANT',
+          content: declineAck,
+          metadata: { sources: [] },
+        }),
+        sessionRepository.updateSession(sessionId, {
+          userName: metadata.userName,
+          sessionMetadata: metadata,
+        }),
+      ]);
+
+      return {
+        sessionId,
+        message: declineAck,
+        context: metadata,
+        sources: [],
+        suggestions: quickReplies,
+        quickReplies,
+        propertyCard: null,
+        propertyCards: [],
+        leadCaptureRequired: false,
+        advisorConnected: false,
+      };
+    }
+
+    // 2. Extract entities: Name, Mobile, Email
+    const candidateName = extractPersonNameFromText(userText);
+    if (candidateName && !metadata.userName) {
+      metadata.userName = formatPersonName(candidateName);
+      metadata.lead.name = metadata.userName;
+    }
+
+    const extractedMobile = extractIndianMobileFromText(userText);
+    const emailMatch = userText.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/);
+
+    let contactCaptured = false;
+    if (extractedMobile) {
+      metadata.lead.phone = extractedMobile.normalized;
+      contactCaptured = true;
+    }
+    if (emailMatch) {
+      metadata.lead.email = emailMatch[0];
+      contactCaptured = true;
+    }
+
+    if (contactCaptured) {
+      metadata.lead.captured = true;
+      metadata.lead.awaitingPhone = false;
+      metadata.lead.awaitingName = false;
+
+      await leadRepository.upsertLead({
+        projectId,
+        sessionId,
+        name: metadata.userName || metadata.lead.name || 'Website Visitor',
+        phone: metadata.lead.phone || '',
+        email: metadata.lead.email || null,
+        intent: 'general_inquiry',
+        status: 'Qualified Lead',
+        preferences: {},
+      });
+
+      const contactAck = `Thank you${metadata.userName ? `, ${metadata.userName}` : ''}! I've noted your contact details. Our team will reach out to assist you further. How else can I help you today?`;
+      const quickReplies = project?.suggestedQuestions?.slice(0, 3) || [];
+
+      await saveUserMessagePromise;
+      metadata.stepIndex += 1;
+      await Promise.all([
+        messageRepository.createMessage({
+          sessionId,
+          role: 'ASSISTANT',
+          content: contactAck,
+          metadata: { sources: [] },
+        }),
+        sessionRepository.updateSession(sessionId, {
+          userName: metadata.userName,
+          sessionMetadata: metadata,
+        }),
+      ]);
+
+      return {
+        sessionId,
+        message: contactAck,
+        context: metadata,
+        sources: [],
+        suggestions: quickReplies,
+        quickReplies,
+        propertyCard: null,
+        propertyCards: [],
+        leadCaptureRequired: true,
+        advisorConnected: true,
+      };
+    }
+
+    // 3. Greetings & Intros
+    const isGreeting =
+      /^(hi|hello|hey|good\s+(morning|afternoon|evening)|greetings|howdy)\b/i.test(textLower) ||
+      (metadata.stepIndex === 0 && userText.length < 5);
+
+    if (isGreeting && metadata.stepIndex === 0) {
+      const welcome = project?.welcomeMessage || metadata.welcomeMessage || `Hello! Welcome to ${projectName}. How can I assist you today?`;
+      metadata.welcomeMessage = welcome;
+      const quickReplies = project?.suggestedQuestions?.slice(0, 3) || [];
+
+      await saveUserMessagePromise;
+      metadata.stepIndex += 1;
+      await Promise.all([
+        messageRepository.createMessage({
+          sessionId,
+          role: 'ASSISTANT',
+          content: welcome,
+          metadata: { sources: [] },
+        }),
+        sessionRepository.updateSession(sessionId, {
+          userName: metadata.userName,
+          sessionMetadata: metadata,
+        }),
+      ]);
+
+      return {
+        sessionId,
+        message: welcome,
+        context: metadata,
+        sources: [],
+        suggestions: quickReplies,
+        quickReplies,
+        propertyCard: null,
+        propertyCards: [],
+        leadCaptureRequired: false,
+        advisorConnected: false,
+      };
+    }
+
+    // 4. Retrieve Bot-Scoped Knowledge Chunks strictly for projectId
+    let retrievedChunks = await retrievalService.hybridRetrieve(
+      projectId,
+      userText,
+      params.clientContext,
+      8
+    );
+
+    // If hybrid retrieval found no chunks matching this specific query,
+    // fetch the bot's stored knowledge chunks so general queries are still grounded in website knowledge!
+    if (!retrievedChunks || retrievedChunks.length === 0) {
+      const allChunks = await knowledgeRepository.getAllChunks(projectId);
+      if (allChunks && allChunks.length > 0) {
+        retrievedChunks = allChunks.slice(0, 5).map((c: any) => ({
+          chunkId: c.id,
+          content: c.content,
+          sourceTitle: c.sourceTitle || c.metadata?.title || 'Knowledge Base',
+          sourceUrl: c.sourceUrl || c.metadata?.url || project?.websiteUrl || '',
+          score: 0.85,
+          metadata: c.metadata,
+          projectId: c.projectId || projectId,
+        }));
+      }
+    }
+    const formattedContext = retrievalService.formatContextForPrompt(retrievedChunks);
+
+    // 5. Fetch recent conversation history
+    const recentDbMessages = await messageRepository.getRecentMessagesBySessionId(sessionId, 6);
+    const historySummary = recentDbMessages
+      .map((m: any) => `${m.role === 'USER' ? 'User' : 'Assistant'}: ${m.content}`)
+      .join('\n');
+
+    // 6. Build dynamic system prompt
+    const systemPrompt = buildDynamicSystemPrompt({
+      botName: projectName,
+      industry,
+      businessDescription: project?.description || '',
+      systemInstructions: project?.systemInstructions || '',
+      websiteUrl: project?.websiteUrl || '',
+      retrievedContext: formattedContext,
+      conversationHistorySummary: historySummary,
+      userName: metadata.userName,
+      contactEmail: project?.contactEmail,
+      contactPhone: project?.contactPhone,
+      leadCaptureEnabled: project?.leadCaptureEnabled ?? true,
+    });
+
+    // 7. Generate Response using OpenAI or Grounded Fallback
+    const aiResult = await openaiService.generateResponse(
+      systemPrompt,
+      userText,
+      formattedContext,
+      {
+        botName: projectName,
+        industry: project?.industry,
+        isRealEstate: false,
+        websiteUrl: project?.websiteUrl,
+        systemInstructions: project?.systemInstructions,
+        description: project?.description,
+      }
+    );
+
+    const responseText = aiResult.text.replace(/\*{3,}/g, '**').trim();
+    const quickReplies = project?.suggestedQuestions?.slice(0, 3) || [];
+
+    // 8. Save Assistant response & update session
+    await saveUserMessagePromise;
+    metadata.stepIndex += 1;
+
+    const sources = retrievedChunks.map((c) => ({
+      title: c.sourceTitle || c.metadata?.title || 'Knowledge Base',
+      url: c.sourceUrl || c.metadata?.url || '',
+      relevance: parseFloat((c.score || 0.9).toFixed(2)),
+      snippet: (c.content || '').slice(0, 160) + '...',
+    }));
+
+    await Promise.all([
+      messageRepository.createMessage({
+        sessionId,
+        role: 'ASSISTANT',
+        content: responseText,
+        metadata: {
+          sources,
+          propertyCard: null,
+          propertyCards: [],
+        },
+      }),
+      sessionRepository.updateSession(sessionId, {
+        userName: metadata.userName,
+        sessionMetadata: metadata,
+      }),
+    ]);
+
+    this.logDiagnostic({
+      requestId,
+      assistantId: projectId,
+      conversationId: sessionId,
+      openaiStatus: 'INVOKED',
+      model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
+      intent: 'CONVERSATION',
+      criteria: {},
+      retrievalRequired: true,
+      retrievalStatus: retrievedChunks.length > 0 ? 'SUCCESS_WITH_RESULTS' : 'SUCCESS_WITH_NO_MATCHES',
+      candidateCount: retrievedChunks.length,
+      finalResultCount: 0,
+      durationMs: Date.now() - startTime,
+    });
+
+    return {
+      sessionId,
+      message: responseText,
+      context: metadata,
+      sources,
+      suggestions: quickReplies,
+      quickReplies,
+      propertyCard: null,
+      propertyCards: [],
+      leadCaptureRequired: false,
+      advisorConnected: false,
     };
   }
 

@@ -73,13 +73,18 @@ export class KnowledgeRepository {
     extractedSummary?: string;
   }): Promise<any> {
     const id = data.id || `src-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+    const rawType = (data.type || 'URL').toUpperCase();
+    const type = (['URL', 'PDF', 'DOCUMENT', 'FAQ'].includes(rawType) ? rawType : 'URL') as any;
+    const rawStatus = (data.status || 'PENDING').toUpperCase();
+    const status = (['PENDING', 'CRAWLING', 'INDEXED', 'FAILED'].includes(rawStatus) ? rawStatus : 'PENDING') as any;
+
     const sourceRecord = {
       id,
       projectId: data.projectId,
-      type: (data.type || 'URL').toUpperCase() as any,
+      type,
       url: data.url,
       title: data.title,
-      status: (data.status || 'PENDING').toUpperCase() as any,
+      status,
       size: data.size || '180 KB',
       extractedSummary: data.extractedSummary || null,
       createdAt: new Date(),
@@ -92,11 +97,28 @@ export class KnowledgeRepository {
 
     if (isDatabaseConnected) {
       try {
-        return await prisma.knowledgeSource.upsert({
-          where: { id },
-          update: sourceRecord as any,
-          create: sourceRecord as any,
-        });
+        // Ensure referenced project exists in DB before upserting source to prevent foreign key errors
+        let projectInDb = await prisma.project.findUnique({ where: { id: data.projectId } });
+        if (!projectInDb) {
+          projectInDb = await prisma.project.findUnique({ where: { slug: data.projectId } });
+        }
+        if (!projectInDb) {
+          const memProj = (await import('./project.repository')).projectRepository;
+          const cachedProj = await memProj.findById(data.projectId);
+          if (cachedProj) {
+            await memProj.create(cachedProj);
+            projectInDb = await prisma.project.findUnique({ where: { id: cachedProj.id || data.projectId } });
+          }
+        }
+
+        if (projectInDb) {
+          sourceRecord.projectId = projectInDb.id;
+          return await prisma.knowledgeSource.upsert({
+            where: { id },
+            update: sourceRecord as any,
+            create: sourceRecord as any,
+          });
+        }
       } catch (err: any) {
         logger.warn(`createSource DB error: ${err.message}. Saving in memory.`);
       }
@@ -107,10 +129,21 @@ export class KnowledgeRepository {
   }
 
   async getSourcesByProjectId(projectId: string): Promise<any[]> {
+    let targetProjectIds = [projectId];
+    try {
+      const { projectRepository } = await import('./project.repository');
+      const proj = (await projectRepository.findById(projectId)) || (await projectRepository.findBySlug(projectId));
+      if (proj) {
+        targetProjectIds = Array.from(new Set([projectId, proj.id, proj.slug].filter(Boolean)));
+      }
+    } catch {
+      // ignore
+    }
+
     if (isDatabaseConnected) {
       try {
         const sources = await prisma.knowledgeSource.findMany({
-          where: { projectId },
+          where: { projectId: { in: targetProjectIds } },
           orderBy: { createdAt: 'desc' },
           include: {
             _count: { select: { documents: true } },
@@ -122,7 +155,7 @@ export class KnowledgeRepository {
       }
     }
 
-    return Array.from(memorySources.values()).filter((s) => s.projectId === projectId);
+    return Array.from(memorySources.values()).filter((s) => targetProjectIds.includes(s.projectId));
   }
 
   async getSourceById(id: string): Promise<any | null> {
@@ -143,7 +176,10 @@ export class KnowledgeRepository {
   async updateSource(id: string, updates: any): Promise<any> {
     if (isDatabaseConnected) {
       try {
-        return await prisma.knowledgeSource.update({ where: { id }, data: updates });
+        const existsInDb = await prisma.knowledgeSource.findUnique({ where: { id } });
+        if (existsInDb) {
+          return await prisma.knowledgeSource.update({ where: { id }, data: updates });
+        }
       } catch (err: any) {
         logger.warn(`updateSource DB error: ${err.message}.`);
       }
@@ -205,11 +241,15 @@ export class KnowledgeRepository {
 
     if (isDatabaseConnected) {
       try {
-        return await prisma.knowledgeDocument.upsert({
-          where: { id },
-          update: docRecord as any,
-          create: docRecord as any,
-        });
+        const sourceInDb = await prisma.knowledgeSource.findUnique({ where: { id: data.sourceId } });
+        const projectInDb = await prisma.project.findUnique({ where: { id: data.projectId } });
+        if (sourceInDb && projectInDb) {
+          return await prisma.knowledgeDocument.upsert({
+            where: { id },
+            update: docRecord as any,
+            create: docRecord as any,
+          });
+        }
       } catch (err: any) {
         logger.warn(`createDocument DB error: ${err.message}. Storing in memory.`);
       }
@@ -240,10 +280,21 @@ export class KnowledgeRepository {
   }
 
   async getDocumentsByProjectId(projectId: string): Promise<any[]> {
+    let targetProjectIds = [projectId];
+    try {
+      const { projectRepository } = await import('./project.repository');
+      const proj = (await projectRepository.findById(projectId)) || (await projectRepository.findBySlug(projectId));
+      if (proj) {
+        targetProjectIds = Array.from(new Set([projectId, proj.id, proj.slug].filter(Boolean)));
+      }
+    } catch {
+      // ignore
+    }
+
     if (isDatabaseConnected) {
       try {
         return await prisma.knowledgeDocument.findMany({
-          where: { projectId },
+          where: { projectId: { in: targetProjectIds } },
           include: { chunks: true },
         });
       } catch (err: any) {
@@ -251,7 +302,7 @@ export class KnowledgeRepository {
       }
     }
 
-    return Array.from(memoryDocuments.values()).filter((d) => d.projectId === projectId);
+    return Array.from(memoryDocuments.values()).filter((d) => targetProjectIds.includes(d.projectId));
   }
 
   async deleteDocumentChunks(documentId: string): Promise<void> {
@@ -295,18 +346,25 @@ export class KnowledgeRepository {
 
     if (isDatabaseConnected) {
       try {
-        await prisma.knowledgeChunk.upsert({
-          where: { id },
-          update: chunkRecord,
-          create: chunkRecord,
-        });
-        if (data.embedding && data.embedding.length > 0) {
-          const vecStr = toPgVector(data.embedding);
-          await prisma.$executeRaw`
-            UPDATE "KnowledgeChunk"
-            SET embedding = ${vecStr}::vector
-            WHERE id = ${id};
-          `;
+        const docInDb = await prisma.knowledgeDocument.findUnique({ where: { id: data.documentId } });
+        const projectInDb = await prisma.project.findUnique({ where: { id: data.projectId } });
+        if (docInDb && projectInDb) {
+          await prisma.knowledgeChunk.upsert({
+            where: { id },
+            update: chunkRecord,
+            create: chunkRecord,
+          });
+          if (data.embedding && data.embedding.length > 0) {
+            const vecStr = toPgVector(data.embedding);
+            await prisma.$executeRaw`
+              UPDATE "KnowledgeChunk"
+              SET embedding = ${vecStr}::vector
+              WHERE id = ${id};
+            `;
+          }
+          memoryChunks.set(id, { ...chunkRecord, embedding: data.embedding || [] });
+          notifyKnowledgeChange(data.projectId);
+          return { ...chunkRecord, embedding: data.embedding || [] };
         }
       } catch (err: any) {
         logger.warn(`createChunk DB error: ${err.message}. Storing in memory.`);
@@ -324,6 +382,17 @@ export class KnowledgeRepository {
     limit = 6,
     minSimilarity = 0.35
   ): Promise<any[]> {
+    let targetProjectIds = [projectId];
+    try {
+      const { projectRepository } = await import('./project.repository');
+      const proj = (await projectRepository.findById(projectId)) || (await projectRepository.findBySlug(projectId));
+      if (proj) {
+        targetProjectIds = Array.from(new Set([projectId, proj.id, proj.slug].filter(Boolean)));
+      }
+    } catch {
+      // fallback to input projectId
+    }
+
     // 1. Try PostgreSQL + pgvector query
     if (isDatabaseConnected && queryEmbedding && queryEmbedding.length > 0) {
       try {
@@ -341,7 +410,7 @@ export class KnowledgeRepository {
             1 - (c.embedding <=> ${vecStr}::vector) AS similarity
           FROM "KnowledgeChunk" c
           JOIN "KnowledgeDocument" d ON c."documentId" = d.id
-          WHERE c."projectId" = ${projectId} AND c.embedding IS NOT NULL
+          WHERE c."projectId" = ANY(${targetProjectIds}) AND c.embedding IS NOT NULL
           ORDER BY c.embedding <=> ${vecStr}::vector
           LIMIT ${limit};
         `;
@@ -367,7 +436,7 @@ export class KnowledgeRepository {
     }
 
     // 2. In-memory cosine similarity fallback
-    const projectChunks = Array.from(memoryChunks.values()).filter((c) => c.projectId === projectId);
+    const projectChunks = Array.from(memoryChunks.values()).filter((c) => targetProjectIds.includes(c.projectId));
     const scoredChunks = projectChunks
       .map((chunk) => {
         const sim = queryEmbedding && queryEmbedding.length > 0 && chunk.embedding && chunk.embedding.length > 0
@@ -382,8 +451,8 @@ export class KnowledgeRepository {
           metadata: chunk.metadata || {},
           chunkIndex: chunk.chunkIndex,
           similarity: sim,
-          sourceTitle: parentDoc?.title || chunk.metadata?.projectName || 'Knowledge Base',
-          sourceUrl: parentDoc?.url || chunk.metadata?.sourceUrl || 'https://prycoons.com/',
+          sourceTitle: parentDoc?.title || chunk.metadata?.projectName || chunk.metadata?.title || 'Knowledge Base',
+          sourceUrl: parentDoc?.url || chunk.metadata?.sourceUrl || chunk.metadata?.url || '',
         };
       })
       .filter((c) => c.similarity >= minSimilarity)
@@ -394,10 +463,21 @@ export class KnowledgeRepository {
   }
 
   async getAllChunks(projectId: string): Promise<any[]> {
+    let targetProjectIds = [projectId];
+    try {
+      const { projectRepository } = await import('./project.repository');
+      const proj = (await projectRepository.findById(projectId)) || (await projectRepository.findBySlug(projectId));
+      if (proj) {
+        targetProjectIds = Array.from(new Set([projectId, proj.id, proj.slug].filter(Boolean)));
+      }
+    } catch {
+      // fallback to input projectId
+    }
+
     if (isDatabaseConnected) {
       try {
         const chunks = await prisma.knowledgeChunk.findMany({
-          where: { projectId },
+          where: { projectId: { in: targetProjectIds } },
           include: {
             document: { select: { title: true, url: true } },
           },
@@ -414,7 +494,7 @@ export class KnowledgeRepository {
       }
     }
 
-    return Array.from(memoryChunks.values()).filter((c) => c.projectId === projectId);
+    return Array.from(memoryChunks.values()).filter((c) => targetProjectIds.includes(c.projectId));
   }
 }
 

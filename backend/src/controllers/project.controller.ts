@@ -1,6 +1,8 @@
 import { Request, Response, NextFunction } from 'express';
 import { projectRepository } from '../repositories/project.repository';
+import { knowledgeController } from './knowledge.controller';
 import { AppError } from '../middleware/errorHandler.middleware';
+import { logger } from '../utils/logger';
 
 export class ProjectController {
   async getProjects(req: Request, res: Response, next: NextFunction) {
@@ -35,6 +37,31 @@ export class ProjectController {
   async createProject(req: Request, res: Response, next: NextFunction) {
     try {
       const project = await projectRepository.create(req.body);
+      const initialSources = req.body.initialSources || [];
+
+      // 1. Always ensure foundational knowledge exists for this project immediately
+      try {
+        await knowledgeController.ensureFoundationalKnowledge(project);
+      } catch (err: any) {
+        logger.warn(`Could not seed foundational knowledge: ${err.message}`);
+      }
+
+      // 2. If initialSources are supplied, process and index them into knowledge repository
+      if (Array.isArray(initialSources) && initialSources.length > 0) {
+        for (const src of initialSources) {
+          knowledgeController.processSingleSourceData(project.id, src).catch((err: any) => {
+            logger.warn(`Failed to process initial source for project ${project.id}: ${err.message}`);
+          });
+        }
+      }
+
+      // 3. If websiteUrl is supplied, automatically trigger website crawling & knowledge indexing for this bot
+      if (project.websiteUrl) {
+        knowledgeController.runIngestionPipeline(project.id, project.websiteUrl, 20).catch((err) => {
+          logger.warn(`Background crawl/ingestion failed for project ${project.id}: ${err.message}`);
+        });
+      }
+
       res.status(201).json({
         success: true,
         data: project,

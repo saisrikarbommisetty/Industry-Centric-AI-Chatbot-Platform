@@ -17,13 +17,20 @@ import { usePlatform } from '../../context/PlatformContext';
 
 export const BotKnowledge = () => {
   const { botId } = useParams();
-  const { bots, knowledgeSources, addKnowledgeSource, removeKnowledgeSource, syncKnowledgeSource, addToast } = usePlatform();
+  const { bots, knowledgeSources, fetchBotKnowledgeSources, addKnowledgeSource, removeKnowledgeSource, syncKnowledgeSource, addToast } = usePlatform();
 
   const currentBot = bots.find((b) => b.id === botId) || bots[0];
   const botSources = knowledgeSources.filter((k) => k.botId === currentBot?.id);
 
   const [filterType, setFilterType] = useState('all');
   const [showAddModal, setShowAddModal] = useState(false);
+
+  // Sync real crawled sources from backend API on mount or bot change
+  React.useEffect(() => {
+    if (currentBot?.id && fetchBotKnowledgeSources) {
+      fetchBotKnowledgeSources(currentBot.id);
+    }
+  }, [currentBot?.id]);
 
   // Add Source Form State
   const [newSourceType, setNewSourceType] = useState('url');
@@ -53,6 +60,9 @@ export const BotKnowledge = () => {
 
   const handleReindexAll = () => {
     botSources.forEach((s) => syncKnowledgeSource(s.id));
+    if (fetchBotKnowledgeSources && currentBot?.id) {
+      setTimeout(() => fetchBotKnowledgeSources(currentBot.id), 1200);
+    }
     addToast('All knowledge sources refreshed and synced!', 'success');
   };
 

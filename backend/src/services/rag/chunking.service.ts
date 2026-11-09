@@ -17,14 +17,15 @@ export class ChunkingService {
   }
 
   /**
-   * Split a crawled page into high-quality semantic chunks preserving property entities
+   * Split a crawled page into high-quality semantic chunks preserving entities
    */
-  chunkPage(page: CrawledPage): SemanticChunk[] {
+  chunkPage(page: CrawledPage, botConfig?: { industry?: string; botName?: string }): SemanticChunk[] {
     const chunks: SemanticChunk[] = [];
     let chunkIndex = 0;
+    const isRealEstate = botConfig?.industry === 'real-estate' || page.url.includes('prycoons.com');
 
-    // 1. Process structured properties from crawler metadata if available
-    if (page.metadata?.properties && page.metadata.properties.length > 0) {
+    // 1. Process structured properties from crawler metadata if available (for real estate bots)
+    if (isRealEstate && page.metadata?.properties && page.metadata.properties.length > 0) {
       for (const prop of page.metadata.properties) {
         const pName = prop.projectName || 'Project';
         const loc = prop.location || page.metadata.location || 'Ahmedabad';
@@ -32,7 +33,7 @@ export class ChunkingService {
         const price = prop.price || 'Price on request';
         const area = prop.carpetArea || 'Spacious layout';
         const status = prop.propertyStatus || 'Under Construction (RERA Approved)';
-        const developer = prop.developer || 'Prycoons Partner';
+        const developer = prop.developer || (botConfig?.botName ? `${botConfig.botName} Partner` : 'Prycoons Partner');
         const amenitiesList = prop.amenities && prop.amenities.length > 0 ? prop.amenities.join(', ') : 'Standard Amenities';
 
         const content = `
@@ -45,7 +46,7 @@ Area: ${area}
 Status: ${status}
 Amenities: ${amenitiesList}
 Source: ${prop.sourceUrl || page.url}
-Verified Details: Official RERA approved listing on Prycoons Real Estate.
+Verified Details: Official listing from ${botConfig?.botName || 'our website'}.
 `.trim();
 
         chunks.push({
@@ -69,7 +70,7 @@ Verified Details: Official RERA approved listing on Prycoons Real Estate.
           chunkIndex: chunkIndex++,
         });
       }
-    } else {
+    } else if (isRealEstate) {
       // Fallback: extract from raw text if crawler did not find structured DOM cards
       const propertyChunks = this.extractIndividualPropertyBlocks(page);
       for (const pChunk of propertyChunks) {
@@ -86,15 +87,15 @@ Verified Details: Official RERA approved listing on Prycoons Real Estate.
     const paragraphs = text
       .split(/\n\s*\n/)
       .map((p) => p.trim())
-      .filter((p) => p.length > 40 && !p.startsWith('Under Construction Rera Approved')); // avoid duplicating extracted listing cards
+      .filter((p) => p.length > 30 && !p.startsWith('Under Construction Rera Approved')); // avoid duplicating extracted listing cards
 
     let currentChunk = '';
     const sectionMetadata = {
       title: page.title,
       sourceUrl: page.url,
-      documentType: page.metadata.documentType || 'general_page',
-      location: page.metadata.location || 'Ahmedabad',
-      propertyType: page.metadata.propertyType || '',
+      documentType: page.metadata?.documentType || 'general_page',
+      location: page.metadata?.location || (isRealEstate ? 'Ahmedabad' : ''),
+      propertyType: page.metadata?.propertyType || '',
     };
 
     for (const para of paragraphs) {

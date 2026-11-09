@@ -238,36 +238,65 @@ export const PlatformProvider = ({ children }) => {
   };
 
   // Assistant / Bot Operations
-  const createBot = (botData) => {
+  const createBot = async (botData) => {
+    const isRealEstate = botData.industryId === 'real-estate' || botData.name?.toLowerCase().includes('prycoons');
     const newId = (botData.name || 'custom-assistant').toLowerCase().replace(/[^a-z0-9]+/g, '-') + '-' + Math.floor(Math.random() * 1000);
     const newBot = {
       id: newId,
       name: botData.name || 'New Assistant',
-      avatar: botData.avatar || '🏢',
-      industryId: botData.industryId || 'real-estate',
-      industryName: botData.industryName || 'Real Estate & Property',
-      description: botData.description || 'Custom conversational assistant configured for your business.',
+      businessName: botData.businessName || botData.name || 'Business',
+      avatar: botData.avatar || (isRealEstate ? '🏢' : '🤖'),
+      industryId: botData.industryId || (isRealEstate ? 'real-estate' : 'general'),
+      industryName: botData.industryName || (isRealEstate ? 'Real Estate & Property' : 'Business'),
+      websiteUrl: botData.websiteUrl || '',
+      description: botData.description || `Custom conversational assistant for ${botData.name || 'your business'}.`,
       status: 'active',
-      model: 'BRIM Conversational Model',
+      model: 'Industry-Centric Conversational Engine',
       tone: botData.tone || 'Professional & Consultative',
-      welcomeMessage: botData.welcomeMessage || `Welcome to ${botData.name || 'Prycoons'}! How can we help you today?`,
-      promptGuidelines: botData.promptGuidelines || 'Provide clear and accurate project details, answers to visitor questions, and assist with bookings.',
+      welcomeMessage: botData.welcomeMessage || `Welcome to ${botData.name || 'our assistant'}! How can we help you today?`,
+      promptGuidelines: botData.promptGuidelines || botData.systemInstructions || 'Provide clear and accurate details grounded in business knowledge.',
+      systemInstructions: botData.systemInstructions || botData.promptGuidelines || '',
       leadCaptureEnabled: botData.leadCaptureEnabled !== undefined ? botData.leadCaptureEnabled : true,
       leadCaptureFields: botData.leadCaptureFields || ['name', 'phone', 'email'],
-      primaryColor: botData.primaryColor || '#C85C4A',
+      primaryColor: botData.primaryColor || (isRealEstate ? '#C85C4A' : '#2563EB'),
       suggestedQuestions: botData.suggestedQuestions && botData.suggestedQuestions.length > 0 
         ? botData.suggestedQuestions 
-        : ['Explore properties', 'Find a suitable project', 'Ask about pricing', 'Talk to our team'],
-      sourcesCount: (botData.initialSources && botData.initialSources.length) || 1,
+        : (isRealEstate
+            ? ['Explore properties', 'Find a suitable project', 'Ask about pricing', 'Talk to our team']
+            : ['What services do you offer?', 'How can I get started?', 'Contact a representative']),
+      sourcesCount: (botData.initialSources && botData.initialSources.length) || (botData.websiteUrl ? 1 : 0),
       totalConversations: 0,
       leadCount: 0,
       csat: 5.0,
-      avgResponseTime: '0.7s',
+      avgResponseTime: '0.6s',
       createdAt: new Date().toISOString().split('T')[0],
       lastActive: 'Just now'
     };
 
     setBots((prev) => [newBot, ...prev]);
+
+    // Asynchronously sync new bot project to backend API with initialSources
+    try {
+      await api.projects.create({
+        id: newBot.id,
+        name: newBot.name,
+        businessName: newBot.businessName,
+        slug: newBot.id,
+        industry: newBot.industryId,
+        industryName: newBot.industryName,
+        websiteUrl: newBot.websiteUrl,
+        description: newBot.description,
+        systemInstructions: newBot.systemInstructions,
+        welcomeMessage: newBot.welcomeMessage,
+        suggestedQuestions: newBot.suggestedQuestions,
+        leadCaptureEnabled: newBot.leadCaptureEnabled,
+        leadCaptureFields: newBot.leadCaptureFields,
+        primaryColor: newBot.primaryColor,
+        initialSources: botData.initialSources || [],
+      });
+    } catch (err) {
+      console.warn('Backend project creation sync notice:', err.message);
+    }
 
     // Add initial knowledge sources if provided
     if (botData.initialSources && botData.initialSources.length > 0) {
@@ -284,19 +313,31 @@ export const PlatformProvider = ({ children }) => {
         extractedSummary: src.summary || 'Content indexed successfully for instant answers.'
       }));
       setKnowledgeSources((prev) => [...newSources, ...prev]);
+
+      // Sync any url-based initial source to backend knowledge
+      for (const src of newSources) {
+        if (src.url && src.url !== '#') {
+          api.knowledge.addUrl(newId, {
+            url: src.url,
+            title: src.title,
+            type: src.type || 'url',
+            summary: src.extractedSummary,
+          }).catch((e) => console.warn('Knowledge URL sync notice:', e.message));
+        }
+      }
     } else {
       setKnowledgeSources((prev) => [
         {
           id: `src-${Date.now()}`,
           botId: newId,
-          title: `${newBot.name} Knowledge Base`,
+          title: `${newBot.name} Official Website Knowledge`,
           type: 'url',
           size: '128 KB',
-          url: botData.websiteUrl || 'https://demo-domain.com/knowledge',
+          url: botData.websiteUrl || 'https://domain.local/knowledge',
           chunks: 14,
           status: 'synced',
           lastSync: 'Just now',
-          extractedSummary: 'Synthesized domain information, product specifications, and answers.'
+          extractedSummary: `Synthesized knowledge for ${newBot.name} based on official business profile and website.`
         },
         ...prev
       ]);
@@ -335,13 +376,13 @@ export const PlatformProvider = ({ children }) => {
     };
 
     try {
-      if (sourceData.url && sourceData.url !== '#') {
-        await api.knowledge.addUrl(botId, {
-          url: sourceData.url,
-          title: sourceData.title,
-          type: sourceData.type || 'url'
-        });
-      }
+      const sourceUrl = (sourceData.url && sourceData.url !== '#') ? sourceData.url : `https://${botId}.local/doc-${Date.now()}`;
+      await api.knowledge.addUrl(botId, {
+        url: sourceUrl,
+        title: sourceData.title,
+        type: sourceData.type || 'url',
+        summary: sourceData.summary || sourceData.extractedSummary,
+      });
     } catch (err) {
       console.warn('Backend addUrl failed:', err);
     }
@@ -379,6 +420,40 @@ export const PlatformProvider = ({ children }) => {
     }
     setKnowledgeSources((prev) => prev.map((s) => s.id === sourceId ? { ...s, lastSync: 'Just now', status: 'synced' } : s));
     addToast('Knowledge source updated and re-synced!', 'success');
+  };
+
+  const fetchBotKnowledgeSources = async (botId) => {
+    if (!botId) return [];
+    try {
+      const res = await api.knowledge.getSources(botId);
+      if (res?.success && Array.isArray(res?.data) && res.data.length > 0) {
+        const backendSources = res.data.map((s) => ({
+          id: s.id,
+          botId,
+          title: s.title || s.url,
+          type: (s.type || 'url').toLowerCase(),
+          size: s.size || '180 KB',
+          url: s.url,
+          chunks: s._count?.documents ? s._count.documents * 4 : 12,
+          status: s.status === 'INDEXED' ? 'synced' : s.status?.toLowerCase() || 'synced',
+          lastSync: s.lastIndexedAt ? new Date(s.lastIndexedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Just now',
+          extractedSummary: s.extractedSummary || 'Indexed for customer queries.'
+        }));
+
+        setKnowledgeSources((prev) => {
+          const otherBotSources = prev.filter((k) => k.botId !== botId);
+          const existingIds = new Set(backendSources.map((b) => b.id));
+          const currentUnique = prev.filter((k) => k.botId === botId && !existingIds.has(k.id));
+          return [...backendSources, ...currentUnique, ...otherBotSources];
+        });
+
+        setBots((prev) => prev.map((b) => b.id === botId ? { ...b, sourcesCount: backendSources.length } : b));
+        return backendSources;
+      }
+    } catch (err) {
+      console.warn(`[PlatformContext] fetchBotKnowledgeSources failed for ${botId}:`, err.message);
+    }
+    return [];
   };
 
   // Conversational Intelligence Responses Engine (Backend RAG Integrated)
@@ -601,6 +676,7 @@ export const PlatformProvider = ({ children }) => {
         updateBot,
         deleteBot,
         knowledgeSources,
+        fetchBotKnowledgeSources,
         addKnowledgeSource,
         removeKnowledgeSource,
         syncKnowledgeSource,

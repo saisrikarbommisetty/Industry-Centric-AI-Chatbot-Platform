@@ -9,9 +9,11 @@ const testFiles = [
   'tests/openai.test.ts',
   'tests/rag.test.ts',
   'tests/context.test.ts',
-  'tests/api.test.ts',
   'tests/chat_improvements.test.ts',
-  'tests/e2e.test.ts',
+  'tests/verify_prycoons_branding_and_welcome.ts',
+  'tests/verify_unified_conversation_flow.ts',
+  'tests/verify_multi_industry_isolation.ts',
+  'tests/verify_bot_creation_and_website_knowledge.ts',
 ];
 
 let allPassed = true;

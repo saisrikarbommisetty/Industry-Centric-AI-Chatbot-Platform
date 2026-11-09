@@ -30,50 +30,82 @@ export const CreateBotWizard = () => {
   // Form State across the 3 simple steps
   const [formData, setFormData] = useState({
     // Step 1: Details
-    name: 'Prycoons Real Estate Assistant',
-    businessName: 'Prycoons Real Estate',
-    industryId: 'real-estate',
-    industryName: 'Real Estate & Property',
-    avatar: '🏢',
-    description: 'Guides property buyers through luxury apartments, BHK configurations, project pricing, brochures, and site visits.',
+    name: '',
+    businessName: '',
+    industryId: 'healthcare',
+    industryName: 'Healthcare & Medical',
+    avatar: '🩺',
+    description: '',
     
     // Step 2: Knowledge
-    websiteUrl: 'https://prycoons.com',
-    crawledPages: [
-      { url: 'https://prycoons.com/projects/the-sovereign', title: 'The Sovereign Sky Villas (4 & 5 BHK)' },
-      { url: 'https://prycoons.com/projects/gift-horizon', title: 'GIFT Horizon Towers Smart Homes' },
-      { url: 'https://prycoons.com/projects/emerald-heights', title: 'Emerald Heights 3 BHK Living' }
-    ],
-    uploadedFiles: [
-      { name: 'Prycoons_Master_Brochure_2026.pdf', size: '4.8 MB', type: 'pdf' },
-      { name: 'GIFT_City_NRI_Tax_Benefits.pdf', size: '2.1 MB', type: 'pdf' }
-    ],
+    websiteUrl: '',
+    crawledPages: [],
+    uploadedFiles: [],
     customLink: '',
-    optionalLinks: ['https://prycoons.com/about-us', 'https://prycoons.com/contact-sales']
+    optionalLinks: []
   });
 
+  const [isNameCustom, setIsNameCustom] = useState(false);
+  const [isBusinessCustom, setIsBusinessCustom] = useState(false);
+  const [isDescCustom, setIsDescCustom] = useState(false);
+
   const handleIndustrySelect = (ind) => {
+    let defaultAvatar = ind.id === 'healthcare' ? '🩺' : ind.id === 'education' ? '🎓' : ind.id === 'ecommerce' ? '🛍️' : ind.id === 'legal' ? '⚖️' : ind.id === 'hospitality' ? '🛎️' : '🏢';
     let defaultName = `${ind.name.split(' ')[0]} Assistant`;
-    let defaultAvatar = '🏢';
-    if (ind.id === 'education') defaultAvatar = '🎓';
-    if (ind.id === 'healthcare') defaultAvatar = '🩺';
-    if (ind.id === 'hospitality') defaultAvatar = '🛎️';
-    if (ind.id === 'ecommerce') defaultAvatar = '🛍️';
-    if (ind.id === 'legal') defaultAvatar = '⚖️';
+    let defaultBusiness = `${ind.name.split(' ')[0]} Services`;
+    let defaultDesc = `Conversational assistant tailored to help visitors with questions about ${ind.name}.`;
+
+    if (ind.id === 'education') {
+      defaultAvatar = '🎓';
+      defaultName = 'Admissions & Campus Assistant';
+      defaultBusiness = 'Metropolitan University';
+      defaultDesc = 'Answers student queries regarding degree programs, admissions criteria, scholarships, tuition, and campus life.';
+    } else if (ind.id === 'healthcare') {
+      defaultAvatar = '🩺';
+      defaultName = 'Clinical & Patient Care Assistant';
+      defaultBusiness = 'CityCare Medical Clinic';
+      defaultDesc = 'Assists patients with clinic services, consulting physicians, consultation hours, and appointment guidelines.';
+    } else if (ind.id === 'ecommerce') {
+      defaultAvatar = '🛍️';
+      defaultName = 'Customer Support & Sales Assistant';
+      defaultBusiness = 'UrbanStyle Lifestyle';
+      defaultDesc = 'Assists shoppers with product recommendations, order tracking, shipping, and return policies.';
+    } else if (ind.id === 'legal') {
+      defaultAvatar = '⚖️';
+      defaultName = 'Legal Advisory Assistant';
+      defaultBusiness = 'Vanguard Legal Partners';
+      defaultDesc = 'Assists clients with practice areas, consultation booking, attorney profiles, and legal intake.';
+    } else if (ind.id === 'hospitality') {
+      defaultAvatar = '🛎️';
+      defaultName = 'Guest Concierge Assistant';
+      defaultBusiness = 'Grand Horizon Hotel';
+      defaultDesc = 'Assists guests with room bookings, amenities, dining reservations, and check-in information.';
+    } else if (ind.id === 'real-estate') {
+      defaultAvatar = '🏢';
+      defaultName = 'Real Estate Assistant';
+      defaultBusiness = 'Prime Realty Properties';
+      defaultDesc = 'Guides property buyers through apartments, BHK configurations, project pricing, brochures, and site visits.';
+    }
 
     setFormData((prev) => ({
       ...prev,
       industryId: ind.id,
       industryName: ind.name,
-      name: defaultName,
-      avatar: defaultAvatar
+      avatar: defaultAvatar,
+      name: isNameCustom && prev.name.trim() ? prev.name : defaultName,
+      businessName: isBusinessCustom && prev.businessName.trim() ? prev.businessName : defaultBusiness,
+      description: isDescCustom && prev.description.trim() ? prev.description : defaultDesc,
+      crawledPages: [],
+      uploadedFiles: prev.uploadedFiles || [],
+      optionalLinks: prev.optionalLinks || []
     }));
   };
 
   const handleSimulateFileUpload = () => {
+    const org = (formData.businessName || formData.name || 'Company').replace(/[^a-zA-Z0-9]/g, '_');
     const newFile = {
-      name: `Project_Brochure_Specifications_${Date.now().toString().slice(-4)}.pdf`,
-      size: '2.8 MB',
+      name: `${org}_Brochure_Documentation_${Date.now().toString().slice(-4)}.pdf`,
+      size: '2.4 MB',
       type: 'pdf'
     };
     setFormData((prev) => ({
@@ -107,24 +139,74 @@ export const CreateBotWizard = () => {
     }));
   };
 
-  const handleFinalCreate = () => {
+  const handleFinalCreate = async () => {
     setLoading(true);
-    setTimeout(() => {
-      const created = createBot({
-        name: formData.name,
+    try {
+      const allSources = [];
+      const trimmedUrl = formData.websiteUrl?.trim();
+      const botDisplayName = formData.name.trim() || 'AI Assistant';
+      const botBusinessName = formData.businessName.trim() || botDisplayName;
+
+      if (trimmedUrl) {
+        allSources.push({
+          title: `${botBusinessName} Official Website Knowledge`,
+          url: trimmedUrl,
+          type: 'url',
+          summary: `Indexed official website domain knowledge for ${botDisplayName}.`
+        });
+      }
+
+      if (formData.optionalLinks && formData.optionalLinks.length > 0) {
+        formData.optionalLinks.forEach((link, idx) => {
+          if (link.trim()) {
+            allSources.push({
+              title: `Reference Source ${idx + 1}`,
+              url: link.trim(),
+              type: 'url',
+              summary: `Indexed reference link for ${botDisplayName}.`
+            });
+          }
+        });
+      }
+
+      if (formData.crawledPages && formData.crawledPages.length > 0) {
+        formData.crawledPages.forEach((p) => {
+          allSources.push({
+            title: p.title,
+            url: p.url,
+            type: 'url',
+            summary: `Crawled page content for ${botDisplayName}.`
+          });
+        });
+      }
+
+      if (formData.uploadedFiles && formData.uploadedFiles.length > 0) {
+        formData.uploadedFiles.forEach((f) => {
+          allSources.push({
+            title: f.name,
+            size: f.size || '2.4 MB',
+            type: 'pdf',
+            summary: `Uploaded documentation for ${botDisplayName}.`
+          });
+        });
+      }
+
+      const created = await createBot({
+        name: botDisplayName,
+        businessName: botBusinessName,
         avatar: formData.avatar,
         industryId: formData.industryId,
         industryName: formData.industryName,
-        description: formData.description,
-        websiteUrl: formData.websiteUrl,
-        initialSources: [
-          ...formData.uploadedFiles.map((f) => ({ title: f.name, size: f.size, type: 'pdf' })),
-          ...formData.crawledPages.map((p) => ({ title: p.title, url: p.url, type: 'url' }))
-        ]
+        description: formData.description || `Specialized conversational assistant for ${botBusinessName}.`,
+        websiteUrl: trimmedUrl || '',
+        initialSources: allSources
       });
       setLoading(false);
       navigate(`/bots/create/success/${created.id}`);
-    }, 600);
+    } catch (err) {
+      setLoading(false);
+      addToast('Error creating assistant: ' + err.message, 'error');
+    }
   };
 
   return (
@@ -195,8 +277,11 @@ export const CreateBotWizard = () => {
                 required
                 className="form-input"
                 value={formData.name}
-                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                placeholder="e.g. Prycoons Assistant"
+                onChange={(e) => {
+                  setIsNameCustom(true);
+                  setFormData({ ...formData, name: e.target.value });
+                }}
+                placeholder="e.g. CityCare Health Assistant"
               />
             </div>
 
@@ -207,8 +292,11 @@ export const CreateBotWizard = () => {
                 required
                 className="form-input"
                 value={formData.businessName}
-                onChange={(e) => setFormData({ ...formData, businessName: e.target.value })}
-                placeholder="e.g. Prycoons Real Estate"
+                onChange={(e) => {
+                  setIsBusinessCustom(true);
+                  setFormData({ ...formData, businessName: e.target.value });
+                }}
+                placeholder="e.g. CityCare Medical Clinic"
               />
             </div>
           </div>
@@ -250,7 +338,10 @@ export const CreateBotWizard = () => {
               rows={3}
               className="form-textarea"
               value={formData.description}
-              onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+              onChange={(e) => {
+                setIsDescCustom(true);
+                setFormData({ ...formData, description: e.target.value });
+              }}
               placeholder="Briefly describe what questions your assistant will answer for customers..."
             />
           </div>

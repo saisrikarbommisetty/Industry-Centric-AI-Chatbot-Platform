@@ -4,19 +4,72 @@ import { logger } from '../../utils/logger';
 import { generateContentHash } from '../../utils/hash';
 import { CrawledPage, ExtractedPropertyMetadata } from '../../types';
 
+export function isPrivateOrLocalAddress(hostname: string): boolean {
+  const h = hostname.toLowerCase().trim();
+  if (h === 'localhost' || h === '127.0.0.1' || h === '0.0.0.0' || h === '::1' || h === '[::1]') return true;
+  if (h === '169.254.169.254' || h === 'metadata.google.internal' || h.endsWith('.internal')) return true;
+
+  // Check IPv4 ranges: 10.x, 127.x, 169.254.x, 172.16-31.x, 192.168.x
+  if (/^127\./.test(h)) return true;
+  if (/^10\./.test(h)) return true;
+  if (/^169\.254\./.test(h)) return true;
+  if (/^192\.168\./.test(h)) return true;
+  if (/^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(h)) return true;
+  if (/^0\./.test(h)) return true;
+
+  // Check integer/hex ip representation (e.g. 2130706433 or 0x7f000001)
+  if (/^\d+$/.test(h) || /^0x[0-9a-f]+$/i.test(h)) return true;
+
+  return false;
+}
+
+export function validateSafeUrl(urlStr: string): URL {
+  let parsed: URL;
+  try {
+    parsed = new URL(urlStr);
+  } catch {
+    throw new Error(`Invalid URL format: "${urlStr}"`);
+  }
+
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    throw new Error(`Invalid URL protocol: "${parsed.protocol}". Only HTTP and HTTPS are permitted.`);
+  }
+
+  if (isPrivateOrLocalAddress(parsed.hostname)) {
+    throw new Error(`Security Exception (SSRF): Crawling private, loopback, or metadata endpoints (${parsed.hostname}) is prohibited.`);
+  }
+
+  return parsed;
+}
+
 export class CrawlerService {
   private userAgent: string;
   private maxPages: number;
 
   constructor() {
-    this.userAgent = ENV.CRAWLER_USER_AGENT;
+    this.userAgent =
+      process.env.CRAWLER_USER_AGENT ||
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 (compatible; BusinessKnowledgeBot/1.0)';
     this.maxPages = ENV.MAX_CRAWL_PAGES || 50;
+  }
+
+  /**
+   * Validate if URL is safe from SSRF attacks (public method)
+   */
+  validateSafeUrl(urlStr: string): boolean {
+    try {
+      validateSafeUrl(urlStr);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   /**
    * Crawl a domain starting from its base URL, discovering sitemaps and internal links
    */
-  async crawlWebsite(startUrl: string, maxPagesOverride?: number): Promise<CrawledPage[]> {
+  async crawlWebsite(startUrl: string, maxPagesOverride?: number, botConfig?: { industry?: string; botName?: string }): Promise<CrawledPage[]> {
+    validateSafeUrl(startUrl);
     const limit = maxPagesOverride || this.maxPages;
     const baseDomain = new URL(startUrl).origin;
     const crawledPages: CrawledPage[] = [];
@@ -26,31 +79,44 @@ export class CrawlerService {
     logger.info(`Starting website crawl for ${startUrl} (Max pages: ${limit})`);
 
     // 1. Discover URLs from sitemap.xml
-    const sitemapUrls = await this.discoverSitemapUrls(startUrl);
-    if (sitemapUrls.length > 0) {
-      logger.info(`Discovered ${sitemapUrls.length} URLs from sitemap.`);
-      for (const u of sitemapUrls) {
-        if (!visitedUrls.has(u) && queue.length < limit * 2) {
-          queue.push(u);
+    try {
+      const sitemapUrls = await this.discoverSitemapUrls(startUrl);
+      if (sitemapUrls.length > 0) {
+        logger.info(`Discovered ${sitemapUrls.length} URLs from sitemap.`);
+        for (const u of sitemapUrls) {
+          if (!visitedUrls.has(u) && queue.length < limit * 2) {
+            queue.push(u);
+          }
         }
       }
+    } catch (err: any) {
+      logger.warn(`Sitemap discovery notice for ${startUrl}: ${err.message}`);
     }
 
     if (queue.length === 0) {
       queue.push(startUrl);
     }
 
-    // 2. Process queue
+    // 2. Process queue & discover internal links
     while (queue.length > 0 && crawledPages.length < limit) {
-      const url = queue.shift()!;
-      const cleanUrl = url.split('#')[0].replace(/\/+$/, '') + '/';
+      const rawQueueUrl = queue.shift()!;
+      let cleanUrl = rawQueueUrl.split('#')[0];
+      try {
+        const uObj = new URL(cleanUrl);
+        if (!uObj.pathname || uObj.pathname === '') {
+          uObj.pathname = '/';
+        }
+        cleanUrl = uObj.href;
+      } catch {
+        cleanUrl = rawQueueUrl;
+      }
 
       if (visitedUrls.has(cleanUrl)) continue;
       visitedUrls.add(cleanUrl);
 
-      // Verify same origin
+      // Verify same origin and SSRF safety
       try {
-        const parsed = new URL(cleanUrl);
+        const parsed = validateSafeUrl(cleanUrl);
         if (parsed.origin !== baseDomain) continue;
       } catch {
         continue;
@@ -59,9 +125,35 @@ export class CrawlerService {
       logger.info(`Crawling [${crawledPages.length + 1}/${limit}]: ${cleanUrl}`);
 
       try {
-        const page = await this.fetchAndExtractPage(cleanUrl);
+        const page = await this.fetchAndExtractPage(cleanUrl, botConfig);
         if (page && page.extractedText.length > 50) {
           crawledPages.push(page);
+
+          // Discover internal links to crawl beyond just sitemaps
+          if (queue.length < limit * 3 && page.rawHtml) {
+            try {
+              const $page = cheerio.load(page.rawHtml);
+              $page('a[href]').each((_, el) => {
+                const href = $page(el).attr('href');
+                if (!href || href.startsWith('#') || href.startsWith('mailto:') || href.startsWith('tel:') || href.startsWith('javascript:')) return;
+                try {
+                  const resolved = new URL(href, cleanUrl);
+                  if (resolved.origin === baseDomain && !isPrivateOrLocalAddress(resolved.hostname)) {
+                    const cleanDiscovered = resolved.href.split('#')[0];
+                    const ext = cleanDiscovered.split('.').pop()?.toLowerCase();
+                    const ignoredExts = ['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'pdf', 'zip', 'mp4', 'mp3', 'css', 'js', 'json'];
+                    if (!ignoredExts.includes(ext || '') && !visitedUrls.has(cleanDiscovered) && queue.length < limit * 3) {
+                      queue.push(cleanDiscovered);
+                    }
+                  }
+                } catch {
+                  // Ignore invalid link
+                }
+              });
+            } catch {
+              // Ignore HTML parse link discovery error
+            }
+          }
         }
       } catch (err: any) {
         logger.warn(`Failed to crawl ${cleanUrl}: ${err.message}. Continuing...`);
@@ -76,6 +168,7 @@ export class CrawlerService {
    * Discover URLs from sitemap.xml or robots.txt
    */
   async discoverSitemapUrls(baseUrl: string): Promise<string[]> {
+    validateSafeUrl(baseUrl);
     const domain = new URL(baseUrl).origin;
     const sitemapCandidates = [
       `${domain}/sitemap.xml`,
@@ -103,6 +196,7 @@ export class CrawlerService {
         if (subSitemaps.length > 0) {
           for (const sub of subSitemaps) {
             try {
+              if (isPrivateOrLocalAddress(new URL(sub).hostname)) continue;
               const subRes = await fetch(sub, {
                 headers: { 'User-Agent': this.userAgent },
                 signal: AbortSignal.timeout(6000),
@@ -144,11 +238,15 @@ export class CrawlerService {
   /**
    * Fetch a single page and extract text and structured property details using Cheerio
    */
-  async fetchAndExtractPage(url: string): Promise<CrawledPage | null> {
+  async fetchAndExtractPage(url: string, botConfig?: { industry?: string; botName?: string }): Promise<CrawledPage | null> {
+    validateSafeUrl(url);
     const res = await fetch(url, {
       headers: {
         'User-Agent': this.userAgent,
-        Accept: 'text/html,application/xhtml+xml',
+        Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Cache-Control': 'no-cache',
+        'Pragma': 'no-cache',
       },
       signal: AbortSignal.timeout(12000),
     });
@@ -158,25 +256,42 @@ export class CrawlerService {
     }
 
     const html = await res.text();
-    return this.parseHtmlContent(url, html);
+    return this.parseHtmlContent(url, html, botConfig);
   }
 
   /**
    * Parse HTML content, extracting structured property data first, then stripping boilerplate
    */
-  parseHtmlContent(url: string, rawHtml: string): CrawledPage {
+  parseHtmlContent(url: string, rawHtml: string, botConfig?: { industry?: string; botName?: string }): CrawledPage {
     const $ = cheerio.load(rawHtml);
+    const isRealEstate = botConfig?.industry === 'real-estate' || url.includes('prycoons.com');
 
-    // 1. Extract structured properties BEFORE stripping DOM
-    const structuredProperties = this.extractPropertiesFromDom($, url);
+    // 1. Extract structured properties only if real estate or listing markup exists
+    const structuredProperties = isRealEstate ? this.extractPropertiesFromDom($, url) : [];
 
-    // 2. Also extract single page metadata (OG tags, JSON-LD)
+    // 2. Extract page metadata
     const pageLevelMetadata = this.extractPageLevelMetadata($, url);
     if (structuredProperties.length > 0) {
       pageLevelMetadata.properties = structuredProperties;
     }
 
-    // 3. Remove boilerplate elements, navigation menus, sidebars, and filter dropdowns
+    // 3. Convert HTML tables into readable text blocks before removing tags
+    $('table').each((_, tbl) => {
+      const rows: string[] = [];
+      $(tbl).find('tr').each((_, tr) => {
+        const cells: string[] = [];
+        $(tr).find('th, td').each((_, td) => {
+          const txt = $(td).text().trim().replace(/\s+/g, ' ');
+          if (txt) cells.push(txt);
+        });
+        if (cells.length > 0) rows.push(cells.join(' | '));
+      });
+      if (rows.length > 0) {
+        $(tbl).replaceWith(`\n${rows.join('\n')}\n`);
+      }
+    });
+
+    // 4. Remove boilerplate elements, navigation menus, sidebars, and filter dropdowns
     $(
       'script, style, noscript, nav, footer, header, svg, iframe, form, aside, ' +
       '.sidebar, .widget, .filter, .filters, .dropdown, .menu, .breadcrumbs, ' +
@@ -225,6 +340,7 @@ export class CrawlerService {
       contentHash,
     };
   }
+
 
   /**
    * Extract individual property cards from Houzez theme markup before DOM stripping

@@ -14,6 +14,7 @@ export interface RetrievalFilter {
 
 export interface RetrievedChunkResult {
   id: string;
+  projectId?: string;
   content: string;
   metadata: Record<string, any>;
   score: number;
@@ -157,11 +158,13 @@ export class RetrievalService {
     projectId: string,
     query: string,
     sessionContext?: any,
-    topKOverride?: number
+    topKOverride?: number,
+    botConfig?: { industry?: string; botName?: string }
   ): Promise<RetrievedChunkResult[]> {
     const k = topKOverride || this.topK;
+    const isRealEstate = (botConfig?.industry === 'real-estate' || projectId === 'prycoons-ai') && botConfig?.industry !== 'healthcare' && botConfig?.industry !== 'education';
     const filters = this.extractQueryFilters(query, sessionContext);
-    const targetLoc = normalizeLocality(filters.location);
+    const targetLoc = isRealEstate ? normalizeLocality(filters.location) : undefined;
 
     // Check retrieval cache to avoid repeating identical searches
     const cacheKey = `${projectId}:${query.trim().toLowerCase()}:${targetLoc || ''}:${filters.propertyType || ''}:${filters.budgetMaxLakhs || ''}:${filters.projectName || ''}`;
@@ -183,7 +186,7 @@ export class RetrievalService {
       logger.warn(`Fast query embedding timeout (${err.message}). Using fallback semantic matching.`);
     }
 
-    // 2. Fetch candidates from vector retrieval
+    // 2. Fetch candidates from vector retrieval scoped strictly to projectId
     let candidates: any[] = [];
     if (queryEmbedding && queryEmbedding.length > 0) {
       try {
@@ -198,53 +201,55 @@ export class RetrievalService {
       }
     }
 
-    // Augment candidates with verified property chunks (cached in memory for sub-millisecond retrieval)
-    try {
-      let propertyChunks: any[] = [];
-      const propCached = this.propertyChunksCache.get(projectId);
-      if (propCached && Date.now() - propCached.timestamp < this.PROPERTY_CACHE_TTL_MS) {
-        propertyChunks = propCached.chunks;
-      } else {
-        const allChunks = await knowledgeRepository.getAllChunks(projectId);
-        propertyChunks = allChunks.filter((chunk) => {
-          const rawMeta = chunk.metadata;
-          const meta = typeof rawMeta === 'string' ? JSON.parse(rawMeta) : (rawMeta || {});
-          return Boolean(meta.projectName || (chunk.content && /Project:\s*\S+/i.test(chunk.content)));
-        });
-        this.propertyChunksCache.set(projectId, { chunks: propertyChunks, timestamp: Date.now() });
-      }
-
-      // If a specific locality was requested, prioritize and isolate chunks from that locality!
-      const relevantPropertyChunks = targetLoc && targetLoc !== 'Ahmedabad'
-        ? propertyChunks.filter((chunk) => {
+    // Augment candidates with verified property chunks only for real estate bots
+    if (isRealEstate) {
+      try {
+        let propertyChunks: any[] = [];
+        const propCached = this.propertyChunksCache.get(projectId);
+        if (propCached && Date.now() - propCached.timestamp < this.PROPERTY_CACHE_TTL_MS) {
+          propertyChunks = propCached.chunks;
+        } else {
+          const allChunks = await knowledgeRepository.getAllChunks(projectId);
+          propertyChunks = allChunks.filter((chunk) => {
             const rawMeta = chunk.metadata;
             const meta = typeof rawMeta === 'string' ? JSON.parse(rawMeta) : (rawMeta || {});
-            const chunkLoc = normalizeLocality(meta.location) || meta.location;
-            if (chunkLoc && chunkLoc.toLowerCase() === targetLoc.toLowerCase()) return true;
-            if (chunkLoc && new RegExp(`\\b${chunkLoc.toLowerCase().replace(/\\s+/g, '\\s+')}\\b`, 'i').test(query.toLowerCase())) return true;
-            const reg = new RegExp(`\\b${targetLoc.replace(/\s+/g, '\\s+')}\\b`, 'i');
-            return reg.test(chunk.content || '');
-          })
-        : propertyChunks;
-
-      const existingIds = new Set(candidates.map((c) => c.id));
-      for (const chunk of relevantPropertyChunks) {
-        if (!existingIds.has(chunk.id)) {
-          const rawMeta = chunk.metadata;
-          const meta = typeof rawMeta === 'string' ? JSON.parse(rawMeta) : (rawMeta || {});
-          candidates.push({
-            ...chunk,
-            metadata: meta,
-            similarity: 0.65,
+            return Boolean(meta.projectName || (chunk.content && /Project:\s*\S+/i.test(chunk.content)));
           });
-          existingIds.add(chunk.id);
+          this.propertyChunksCache.set(projectId, { chunks: propertyChunks, timestamp: Date.now() });
         }
+
+        // If a specific locality was requested, prioritize and isolate chunks from that locality!
+        const relevantPropertyChunks = targetLoc && targetLoc !== 'Ahmedabad'
+          ? propertyChunks.filter((chunk) => {
+              const rawMeta = chunk.metadata;
+              const meta = typeof rawMeta === 'string' ? JSON.parse(rawMeta) : (rawMeta || {});
+              const chunkLoc = normalizeLocality(meta.location) || meta.location;
+              if (chunkLoc && chunkLoc.toLowerCase() === targetLoc.toLowerCase()) return true;
+              if (chunkLoc && new RegExp(`\\b${chunkLoc.toLowerCase().replace(/\\s+/g, '\\s+')}\\b`, 'i').test(query.toLowerCase())) return true;
+              const reg = new RegExp(`\\b${targetLoc.replace(/\s+/g, '\\s+')}\\b`, 'i');
+              return reg.test(chunk.content || '');
+            })
+          : propertyChunks;
+
+        const existingIds = new Set(candidates.map((c) => c.id));
+        for (const chunk of relevantPropertyChunks) {
+          if (!existingIds.has(chunk.id)) {
+            const rawMeta = chunk.metadata;
+            const meta = typeof rawMeta === 'string' ? JSON.parse(rawMeta) : (rawMeta || {});
+            candidates.push({
+              ...chunk,
+              metadata: meta,
+              similarity: 0.65,
+            });
+            existingIds.add(chunk.id);
+          }
+        }
+      } catch (err: any) {
+        logger.warn(`Error augmenting property chunks: ${err.message}`);
       }
-    } catch (err: any) {
-      logger.warn(`Error augmenting property chunks: ${err.message}`);
     }
 
-    // If still no candidates, fallback to all chunks
+    // If still no candidates, fallback to all chunks of this project
     if (candidates.length === 0) {
       candidates = await knowledgeRepository.getAllChunks(projectId);
     }
@@ -269,81 +274,148 @@ export class RetrievalService {
         meta = rawMeta;
       }
 
-      const hasProject = Boolean(meta.projectName || /Project:\s*\S+/i.test(contentLower));
+      if (isRealEstate) {
+        const hasProject = Boolean(meta.projectName || /Project:\s*\S+/i.test(contentLower));
 
-      // Property chunk boost: prioritize actual property listings over general web text
-      if (hasProject) {
-        score += 0.35;
-      }
+        // Property chunk boost: prioritize actual property listings over general web text
+        if (hasProject) {
+          score += 0.35;
+        }
 
-      // Match Project Name
-      if (filters.projectName && (contentLower.includes(filters.projectName) || (meta.projectName || '').toLowerCase().includes(filters.projectName))) {
-        score += 0.45;
-      }
+        // Match Project Name
+        if (filters.projectName && (contentLower.includes(filters.projectName) || (meta.projectName || '').toLowerCase().includes(filters.projectName))) {
+          score += 0.45;
+        }
 
-      // Match Location
-      if (targetLoc && targetLoc !== 'Ahmedabad') {
-        const chunkLoc = normalizeLocality(meta.location) || meta.location;
-        const targetLower = targetLoc.toLowerCase();
-        const matchesTargetLoc =
-          (chunkLoc && chunkLoc.toLowerCase() === targetLower) ||
-          new RegExp(`\\b${targetLoc.replace(/\s+/g, '\\s+')}\\b`, 'i').test(contentLower);
+        // Match Location
+        if (targetLoc && targetLoc !== 'Ahmedabad') {
+          const chunkLoc = normalizeLocality(meta.location) || meta.location;
+          const targetLower = targetLoc.toLowerCase();
+          const matchesTargetLoc =
+            (chunkLoc && chunkLoc.toLowerCase() === targetLower) ||
+            new RegExp(`\\b${targetLoc.replace(/\s+/g, '\\s+')}\\b`, 'i').test(contentLower);
 
-        if (matchesTargetLoc) {
-          score += 0.80; // High boost for matching requested locality
-        } else if (
-          chunkLoc &&
-          chunkLoc.toLowerCase() !== targetLower &&
-          chunkLoc.toLowerCase() !== 'ahmedabad'
-        ) {
-          const isChunkLocInQuery = new RegExp(`\\b${chunkLoc.toLowerCase().replace(/\\s+/g, '\\s+')}\\b`, 'i').test(qLower);
-          if (isChunkLocInQuery) {
-            score += 0.80; // Boost when user asked for multiple localities (e.g. "Gota or Science City")
-          } else {
-            score -= 2.0; // Heavy penalty for chunks that belong to a DIFFERENT locality
+          if (matchesTargetLoc) {
+            score += 0.80; // High boost for matching requested locality
+          } else if (
+            chunkLoc &&
+            chunkLoc.toLowerCase() !== targetLower &&
+            chunkLoc.toLowerCase() !== 'ahmedabad'
+          ) {
+            const isChunkLocInQuery = new RegExp(`\\b${chunkLoc.toLowerCase().replace(/\\s+/g, '\\s+')}\\b`, 'i').test(qLower);
+            if (isChunkLocInQuery) {
+              score += 0.80; // Boost when user asked for multiple localities (e.g. "Gota or Science City")
+            } else {
+              score -= 2.0; // Heavy penalty for chunks that belong to a DIFFERENT locality
+            }
+          }
+        } else if (filters.location) {
+          const locLower = filters.location.toLowerCase();
+          if (contentLower.includes(locLower) || (meta.location || '').toLowerCase().includes(locLower) || (meta.city || '').toLowerCase().includes(locLower)) {
+            score += 0.30;
           }
         }
-      } else if (filters.location) {
-        const locLower = filters.location.toLowerCase();
-        if (contentLower.includes(locLower) || (meta.location || '').toLowerCase().includes(locLower) || (meta.city || '').toLowerCase().includes(locLower)) {
-          score += 0.30;
+
+        // Match BHK / Property Type
+        if (filters.propertyType) {
+          const typeLower = filters.propertyType.toLowerCase();
+          if (contentLower.includes(typeLower) || (meta.propertyType || '').toLowerCase().includes(typeLower) || (meta.bhk || '').toLowerCase().includes(typeLower)) {
+            score += 0.25;
+          }
         }
-      }
 
-      // Match BHK / Property Type
-      if (filters.propertyType) {
-        const typeLower = filters.propertyType.toLowerCase();
-        if (contentLower.includes(typeLower) || (meta.propertyType || '').toLowerCase().includes(typeLower) || (meta.bhk || '').toLowerCase().includes(typeLower)) {
-          score += 0.25;
+        // Match Budget constraint
+        if (filters.budgetMaxLakhs && meta.priceNum) {
+          if (meta.priceNum <= filters.budgetMaxLakhs * 1.05) {
+            score += 0.20;
+          } else {
+            score -= 0.35; // penalize if over budget
+          }
         }
-      }
 
-      // Match Budget constraint
-      if (filters.budgetMaxLakhs && meta.priceNum) {
-        if (meta.priceNum <= filters.budgetMaxLakhs * 1.05) {
-          score += 0.20;
-        } else {
-          score -= 0.35; // penalize if over budget
+        // Keyword overlap boost
+        let matchedTokens = 0;
+        for (const token of queryTokens) {
+          if (contentLower.includes(token)) matchedTokens++;
         }
-      }
+        if (queryTokens.length > 0) {
+          score += (matchedTokens / queryTokens.length) * 0.20;
+        }
 
-      // Keyword overlap boost
-      let matchedTokens = 0;
-      for (const token of queryTokens) {
-        if (contentLower.includes(token)) matchedTokens++;
-      }
-      if (queryTokens.length > 0) {
-        score += (matchedTokens / queryTokens.length) * 0.20;
-      }
+        scoredList.push({
+          id: c.id,
+          projectId: c.projectId || projectId,
+          content: c.content,
+          metadata: meta,
+          score,
+          sourceTitle: c.sourceTitle || meta.projectName || 'Prycoons Real Estate Records',
+          sourceUrl: c.sourceUrl || meta.sourceUrl || 'https://prycoons.com/',
+        });
+      } else {
+        // Multi-Industry / General Bot scoring
+        // Expand search tokens with common inquiry synonyms
+        const expandedTokens = new Set<string>(queryTokens);
+        if (queryTokens.some((t) => ['price', 'pricing', 'cost', 'fee', 'charge', 'rate', 'much', 'expensive', 'cheap'].includes(t))) {
+          ['price', 'cost', 'fee', 'charges', 'rate', '₹', '$'].forEach((w) => expandedTokens.add(w));
+        }
+        if (queryTokens.some((t) => ['time', 'timing', 'hours', 'hour', 'schedule', 'open', 'close', 'when', 'days'].includes(t))) {
+          ['hours', 'timing', 'time', 'schedule', 'open', 'closed', 'am', 'pm', 'monday', 'sunday'].forEach((w) => expandedTokens.add(w));
+        }
+        if (queryTokens.some((t) => ['service', 'services', 'offer', 'treatment', 'treatments', 'product', 'products', 'do', 'help', 'provide'].includes(t))) {
+          ['service', 'services', 'offer', 'provides', 'treatment', 'treatments', 'solutions', 'care'].forEach((w) => expandedTokens.add(w));
+        }
+        if (queryTokens.some((t) => ['contact', 'reach', 'phone', 'call', 'email', 'number', 'address', 'where', 'location'].includes(t))) {
+          ['contact', 'phone', 'email', 'call', 'reach', 'website', 'address', 'located'].forEach((w) => expandedTokens.add(w));
+        }
 
-      scoredList.push({
-        id: c.id,
-        content: c.content,
-        metadata: meta,
-        score,
-        sourceTitle: c.sourceTitle || meta.projectName || 'Prycoons Real Estate Records',
-        sourceUrl: c.sourceUrl || meta.sourceUrl || 'https://prycoons.com/',
-      });
+        let matchedTokens = 0;
+        for (const token of expandedTokens) {
+          if (contentLower.includes(token)) matchedTokens++;
+        }
+        if (expandedTokens.size > 0) {
+          score += (matchedTokens / expandedTokens.size) * 0.70;
+        }
+
+        // Boost chunks containing prices when user asks about price/cost
+        const isPriceQuery = expandedTokens.has('price') || expandedTokens.has('cost');
+        if (isPriceQuery && (contentLower.includes('₹') || contentLower.includes('$') || /\b(costs?|price|pricing|fee|fees)\b/i.test(contentLower))) {
+          score += 0.65;
+        }
+
+        // Boost chunks containing hours when user asks about timing
+        const isTimeQuery = expandedTokens.has('hours') || expandedTokens.has('timing');
+        if (isTimeQuery && /\b(\d{1,2}(?::\d{2})?\s*(?:am|pm)|hours|timing|schedule)\b/i.test(contentLower)) {
+          score += 0.65;
+        }
+
+        // Exact query substring match boost
+        if (contentLower.includes(qLower)) {
+          score += 0.50;
+        }
+
+        // Document title match boost
+        if (c.sourceTitle && Array.from(expandedTokens).some((t) => c.sourceTitle.toLowerCase().includes(t))) {
+          score += 0.35;
+        }
+
+        // Strict relevance check: do not return chunks with zero keyword and zero vector match
+        const hasKeywordMatch = matchedTokens > 0 || contentLower.includes(qLower) || Boolean(c.sourceTitle && Array.from(expandedTokens).some((t) => c.sourceTitle.toLowerCase().includes(t)));
+        const hasVectorMatch = Boolean(c.similarity && c.similarity >= this.similarityThreshold);
+
+        if (!hasKeywordMatch && !hasVectorMatch) {
+          continue;
+        }
+
+        scoredList.push({
+          id: c.id,
+          projectId: c.projectId || projectId,
+          content: c.content,
+          metadata: meta,
+          score,
+          sourceTitle: c.sourceTitle || meta.title || (botConfig?.botName ? `${botConfig.botName} Knowledge` : 'Knowledge Base'),
+          sourceUrl: c.sourceUrl || meta.sourceUrl || '',
+        });
+      }
     }
 
     // Sort by final hybrid score descending
@@ -356,24 +428,27 @@ export class RetrievalService {
       timestamp: Date.now(),
     });
 
-    logger.info(`Hybrid retrieval for "${query}" (Loc: ${targetLoc || 'Any'}): Found ${topResults.length} relevant chunks (top score: ${topResults[0]?.score.toFixed(2) || '0.00'})`);
+    logger.info(`Hybrid retrieval for "${query}" (Project: ${projectId}, RealEstate: ${isRealEstate}): Found ${topResults.length} relevant chunks (top score: ${topResults[0]?.score.toFixed(2) || '0.00'})`);
     return topResults;
   }
 
   /**
    * Format retrieved chunks into a clean grounded context block for LLM prompt
    */
-  formatContextForPrompt(chunks: RetrievedChunkResult[], maxChunks = 3): string {
+  formatContextForPrompt(chunks: RetrievedChunkResult[], maxChunks = 3, botConfig?: { industry?: string; botName?: string }): string {
+    const isRealEstate = (botConfig?.industry === 'real-estate') && botConfig?.industry !== 'healthcare' && botConfig?.industry !== 'education';
     if (!chunks || chunks.length === 0) {
-      return 'No specific property records were retrieved for this query.';
+      return isRealEstate
+        ? 'No specific property records were retrieved for this query.'
+        : 'No specific knowledge records were retrieved for this query in the knowledge base.';
     }
 
-    // Filter out chunks that were heavily penalized (score <= 0) to ensure LLM context is geographically clean
+    // Filter out chunks that were heavily penalized (score <= 0) to ensure LLM context is clean
     const validChunks = chunks.filter((c) => c.score > 0);
     const chosen = validChunks.length > 0 ? validChunks.slice(0, maxChunks) : chunks.slice(0, maxChunks);
 
     return chosen
-      .map((c, i) => `[Source ${i + 1}: ${c.sourceTitle} | ${c.sourceUrl}]\n${c.content}`)
+      .map((c, i) => `[Source ${i + 1}: ${c.sourceTitle}${c.sourceUrl ? ` | ${c.sourceUrl}` : ''}]\n${c.content}`)
       .join('\n\n---\n\n');
   }
 }
