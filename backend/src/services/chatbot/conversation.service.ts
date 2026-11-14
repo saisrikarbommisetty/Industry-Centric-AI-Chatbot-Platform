@@ -1302,6 +1302,56 @@ Please respond to the user warmly, helpfully, and concisely (under 50 words). Pr
   }
 
   /**
+   * Resolves contextual references in follow-up queries (e.g. "What about the second one?", "What is its price?")
+   */
+  private resolveContextualQuery(userText: string, recentMessages: any[]): string {
+    const isFollowUp =
+      /\b(it|its|that|this|the second one|second option|first one|third one|former|latter|eligibility|requirements|price|pricing|cost|timing|hours|where|admission|details)\b/i.test(userText) &&
+      userText.trim().split(/\s+/).length <= 10;
+
+    if (!isFollowUp || !recentMessages || recentMessages.length === 0) {
+      return userText;
+    }
+
+    // Find the last assistant message
+    const lastAssistantMsg = [...recentMessages].reverse().find((m) => m.role === 'ASSISTANT');
+    if (!lastAssistantMsg || !lastAssistantMsg.content) return userText;
+
+    const content = lastAssistantMsg.content;
+
+    // Extract bolded entities: e.g. **Data Science**, **Ananta**, **Cardiology**
+    const boldMatches = [...content.matchAll(/\*\*([^*]+)\*\*/g)].map((m) => m[1].trim());
+
+    // Extract bullet points: e.g. • Web Development
+    const bulletMatches = [...content.matchAll(/(?:•|-|\d+\.)\s*([^\n\r.]+)/g)].map((m) => m[1].trim());
+
+    const candidates = [...boldMatches, ...bulletMatches].filter(
+      (c) => c.length > 2 && c.length < 60 && !/source|website|verified|http|click/i.test(c)
+    );
+
+    if (/\b(second|2nd)\b/i.test(userText) && candidates.length >= 2) {
+      return `${candidates[1]} ${userText}`;
+    }
+    if (/\b(first|1st)\b/i.test(userText) && candidates.length >= 1) {
+      return `${candidates[0]} ${userText}`;
+    }
+    if (/\b(third|3rd)\b/i.test(userText) && candidates.length >= 3) {
+      return `${candidates[2]} ${userText}`;
+    }
+    if (candidates.length > 0) {
+      return `${candidates[0]} ${userText}`;
+    }
+
+    // Fall back to previous user query topic
+    const prevUserMsg = [...recentMessages].reverse().find((m) => m.role === 'USER' && m.content !== userText);
+    if (prevUserMsg?.content) {
+      return `${prevUserMsg.content} ${userText}`;
+    }
+
+    return userText;
+  }
+
+  /**
    * Process incoming messages for general / non-real-estate industry bots
    * Strictly isolates knowledge, identity, and conversation flow to the specific bot.
    */
@@ -1468,10 +1518,19 @@ Please respond to the user warmly, helpfully, and concisely (under 50 words). Pr
       };
     }
 
-    // 4. Retrieve Bot-Scoped Knowledge Chunks strictly for projectId
+    // 4. Fetch recent conversation history and resolve contextual follow-up query
+    const recentDbMessages = await messageRepository.getRecentMessagesBySessionId(sessionId, 6);
+    const historySummary = recentDbMessages
+      .map((m: any) => `${m.role === 'USER' ? 'User' : 'Assistant'}: ${m.content}`)
+      .join('\n');
+
+    // Contextual query resolution for follow-ups (e.g. "What about the second one?", "What are its requirements?")
+    const retrievalQuery = this.resolveContextualQuery(userText, recentDbMessages);
+
+    // 5. Retrieve Bot-Scoped Knowledge Chunks strictly for projectId
     let retrievedChunks = await retrievalService.hybridRetrieve(
       projectId,
-      userText,
+      retrievalQuery,
       params.clientContext,
       8,
       {
@@ -1498,13 +1557,7 @@ Please respond to the user warmly, helpfully, and concisely (under 50 words). Pr
         }));
       }
     }
-    const formattedContext = retrievalService.formatContextForPrompt(retrievedChunks, 3, { industry, botName: projectName });
-
-    // 5. Fetch recent conversation history
-    const recentDbMessages = await messageRepository.getRecentMessagesBySessionId(sessionId, 6);
-    const historySummary = recentDbMessages
-      .map((m: any) => `${m.role === 'USER' ? 'User' : 'Assistant'}: ${m.content}`)
-      .join('\n');
+    const formattedContext = retrievalService.formatContextForPrompt(retrievedChunks, 6, { industry, botName: projectName });
 
     // 6. Build dynamic system prompt
     const systemPrompt = buildDynamicSystemPrompt({
@@ -1579,6 +1632,20 @@ Please respond to the user warmly, helpfully, and concisely (under 50 words). Pr
         sessionMetadata: metadata,
       }),
     ]);
+
+    // Knowledge Gap Diagnostics: track why a query yielded an unavailable information response
+    const isUnavailableResponse = /not (confirmed|available|specified|provided|mentioned)|do not have|don't have|couldn't find/i.test(responseText);
+    if (isUnavailableResponse) {
+      let gapReason = 'UNKNOWN';
+      if (!retrievedChunks || retrievedChunks.length === 0) {
+        gapReason = 'CHUNKS_SEARCHED_BUT_ZERO_RETRIEVED';
+      } else if (retrievedChunks.every((c) => c.score < 0.6)) {
+        gapReason = 'CHUNKS_RETRIEVED_BUT_CONFIDENCE_LOW';
+      } else {
+        gapReason = 'VERIFIED_CONTEXT_PRESENT_BUT_SPECIFIC_FACT_ABSENT_IN_SOURCE';
+      }
+      logger.info(`[KNOWLEDGE_GAP_DIAGNOSTIC] Project: ${projectId}, Query: "${userText.slice(0, 80)}", Reason: ${gapReason}, TopScore: ${retrievedChunks[0]?.score?.toFixed(2) || '0.00'}`);
+    }
 
     this.logDiagnostic({
       requestId,

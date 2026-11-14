@@ -129,21 +129,32 @@ export class CrawlerService {
         if (page && page.extractedText.length > 50) {
           crawledPages.push(page);
 
-          // Discover internal links to crawl beyond just sitemaps
-          if (queue.length < limit * 3 && page.rawHtml) {
+          // Discover internal links to crawl beyond just sitemaps (navigation, footer, pagination, canonical)
+          if (queue.length < limit * 4 && page.rawHtml) {
             try {
               const $page = cheerio.load(page.rawHtml);
-              $page('a[href]').each((_, el) => {
-                const href = $page(el).attr('href');
+              $page('a[href], link[rel="canonical"], link[rel="next"], [data-href]').each((_, el) => {
+                const href = $page(el).attr('href') || $page(el).attr('data-href');
                 if (!href || href.startsWith('#') || href.startsWith('mailto:') || href.startsWith('tel:') || href.startsWith('javascript:')) return;
                 try {
                   const resolved = new URL(href, cleanUrl);
                   if (resolved.origin === baseDomain && !isPrivateOrLocalAddress(resolved.hostname)) {
+                    // Strip marketing tracking query parameters while preserving pagination and content params
+                    ['utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content', 'fbclid', 'gclid', '_ga', 'ref'].forEach((p) => {
+                      resolved.searchParams.delete(p);
+                    });
                     const cleanDiscovered = resolved.href.split('#')[0];
                     const ext = cleanDiscovered.split('.').pop()?.toLowerCase();
-                    const ignoredExts = ['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'pdf', 'zip', 'mp4', 'mp3', 'css', 'js', 'json'];
-                    if (!ignoredExts.includes(ext || '') && !visitedUrls.has(cleanDiscovered) && queue.length < limit * 3) {
-                      queue.push(cleanDiscovered);
+                    const ignoredExts = ['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'pdf', 'zip', 'mp4', 'mp3', 'css', 'js', 'json', 'ico', 'woff', 'ttf'];
+                    if (!ignoredExts.includes(ext || '') && !visitedUrls.has(cleanDiscovered) && queue.length < limit * 4) {
+                      const isHighPriority = /(?:about|service|product|treatment|course|program|pricing|fee|cost|contact|faq|admission|curriculum|policy|amenit|doctor|team|faculty|schedule|track|spec)/i.test(cleanDiscovered);
+                      if (isHighPriority) {
+                        // Place high priority pages towards the front
+                        const insertIdx = Math.min(queue.length, 3);
+                        queue.splice(insertIdx, 0, cleanDiscovered);
+                      } else {
+                        queue.push(cleanDiscovered);
+                      }
                     }
                   }
                 } catch {
@@ -167,17 +178,45 @@ export class CrawlerService {
   /**
    * Discover URLs from sitemap.xml or robots.txt
    */
+  /**
+   * Discover URLs from sitemap.xml or robots.txt with fallback heuristics
+   */
   async discoverSitemapUrls(baseUrl: string): Promise<string[]> {
     validateSafeUrl(baseUrl);
     const domain = new URL(baseUrl).origin;
     const sitemapCandidates = [
       `${domain}/sitemap.xml`,
       `${domain}/sitemap_index.xml`,
-      `${domain}/property_area-sitemap.xml`,
-      `${domain}/property-sitemap.xml`,
+      `${domain}/wp-sitemap.xml`,
+      `${domain}/sitemap/sitemap.xml`,
       `${domain}/page-sitemap.xml`,
       `${domain}/post-sitemap.xml`,
+      `${domain}/category-sitemap.xml`,
+      `${domain}/service-sitemap.xml`,
+      `${domain}/product-sitemap.xml`,
+      `${domain}/course-sitemap.xml`,
+      `${domain}/property_area-sitemap.xml`,
+      `${domain}/property-sitemap.xml`,
+      `${domain}/sitemap1.xml`,
+      `${domain}/sitemap_pages.xml`,
     ];
+
+    // Try reading robots.txt for Sitemap declaration first
+    try {
+      const robotsRes = await fetch(`${domain}/robots.txt`, {
+        headers: { 'User-Agent': this.userAgent },
+        signal: AbortSignal.timeout(4000),
+      });
+      if (robotsRes.ok) {
+        const robotsTxt = await robotsRes.text();
+        const sitemapMatches = [...robotsTxt.matchAll(/Sitemap:\s*(https?:\/\/[^\s\r\n]+)/gi)].map((m) => m[1].trim());
+        for (const sm of sitemapMatches) {
+          if (!sitemapCandidates.includes(sm)) {
+            sitemapCandidates.unshift(sm);
+          }
+        }
+      }
+    } catch {}
 
     const discoveredUrls: string[] = [];
 
@@ -191,19 +230,23 @@ export class CrawlerService {
         if (!res.ok) continue;
         const xml = await res.text();
 
-        // Check for sub-sitemaps
-        const subSitemaps = [...xml.matchAll(/<loc>(https?:\/\/[^<]+\.xml)<\/loc>/gi)].map((m) => m[1]);
-        if (subSitemaps.length > 0) {
-          for (const sub of subSitemaps) {
+        // Check for sub-sitemaps (Sitemap Index) - handles whitespace and various sub-sitemap extensions
+        const subSitemaps = [...xml.matchAll(/<sitemap>\s*<loc>\s*(https?:\/\/[^<\s]+)\s*<\/loc>/gi)].map((m) => m[1].trim());
+        const xmlSubMatches = subSitemaps.length > 0 
+          ? subSitemaps 
+          : [...xml.matchAll(/<loc>\s*(https?:\/\/[^<\s]+\.xml(?:\.gz)?)\s*<\/loc>/gi)].map((m) => m[1].trim());
+
+        if (xmlSubMatches.length > 0) {
+          for (const sub of xmlSubMatches.slice(0, 10)) {
             try {
               if (isPrivateOrLocalAddress(new URL(sub).hostname)) continue;
               const subRes = await fetch(sub, {
                 headers: { 'User-Agent': this.userAgent },
-                signal: AbortSignal.timeout(6000),
+                signal: AbortSignal.timeout(5000),
               });
               if (subRes.ok) {
                 const subXml = await subRes.text();
-                const urls = [...subXml.matchAll(/<loc>(https?:\/\/[^<]+)<\/loc>/gi)].map((m) => m[1]);
+                const urls = [...subXml.matchAll(/<loc>\s*(https?:\/\/[^<\s]+)\s*<\/loc>/gi)].map((m) => m[1].trim());
                 discoveredUrls.push(...urls);
               }
             } catch {
@@ -212,25 +255,31 @@ export class CrawlerService {
           }
         }
 
-        // Check direct page URLs
-        const directUrls = [...xml.matchAll(/<loc>(https?:\/\/[^<]+)<\/loc>/gi)]
-          .map((m) => m[1])
-          .filter((u) => !u.endsWith('.xml') && !u.endsWith('.png') && !u.endsWith('.jpg') && !u.endsWith('.pdf'));
+        // Check direct page URLs with flexible whitespace matching
+        const directUrls = [...xml.matchAll(/<loc>\s*(https?:\/\/[^<\s]+)\s*<\/loc>/gi)]
+          .map((m) => m[1].trim())
+          .filter((u) => !u.endsWith('.xml') && !u.endsWith('.xml.gz') && !u.endsWith('.png') && !u.endsWith('.jpg') && !u.endsWith('.jpeg') && !u.endsWith('.svg') && !u.endsWith('.pdf'));
 
         discoveredUrls.push(...directUrls);
+        if (discoveredUrls.length >= 100) break;
       } catch {
         // Skip inaccessible sitemap
       }
     }
 
-    // Deduplicate and filter relevant property & locality pages first
+    // Deduplicate and prioritize key informational pages across all industries
     const unique = Array.from(new Set(discoveredUrls));
+    const highPriorityPatterns = [
+      /about/i, /service/i, /product/i, /treatment/i, /course/i, /program/i,
+      /pricing/i, /fee/i, /cost/i, /contact/i, /faq/i, /doctor/i, /specialt/i,
+      /admission/i, /properties/i, /projects/i, /amenit/i, /policy/i,
+    ];
+
     return unique.sort((a, b) => {
-      // Prioritize property and locality listing pages
-      const isAProperty = a.includes('flats-in') || a.includes('properties') || a.includes('projects');
-      const isBProperty = b.includes('flats-in') || b.includes('properties') || b.includes('projects');
-      if (isAProperty && !isBProperty) return -1;
-      if (!isAProperty && isBProperty) return 1;
+      const aMatches = highPriorityPatterns.some((p) => p.test(a));
+      const bMatches = highPriorityPatterns.some((p) => p.test(b));
+      if (aMatches && !bMatches) return -1;
+      if (!aMatches && bMatches) return 1;
       return 0;
     });
   }
@@ -262,20 +311,101 @@ export class CrawlerService {
   /**
    * Parse HTML content, extracting structured property data first, then stripping boilerplate
    */
+  /**
+   * Parse HTML content, extracting structured property data first, then stripping boilerplate
+   */
   parseHtmlContent(url: string, rawHtml: string, botConfig?: { industry?: string; botName?: string }): CrawledPage {
     const $ = cheerio.load(rawHtml);
     const isRealEstate = botConfig?.industry === 'real-estate' || url.includes('prycoons.com');
 
-    // 1. Extract structured properties only if real estate or listing markup exists
+    // 1. Extract JSON-LD and Schema data (rich structured data for products, FAQs, organization, courses)
+    const structuredKnowledgeBlocks: string[] = [];
+    $('script[type="application/ld+json"]').each((_, el) => {
+      try {
+        const text = $(el).text().trim();
+        if (!text) return;
+        const parsed = JSON.parse(text);
+        const items = Array.isArray(parsed) ? parsed : [parsed];
+        for (const item of items) {
+          if (!item || typeof item !== 'object') continue;
+          // Organization / LocalBusiness
+          if (item.name || item.telephone || item.email || item.address) {
+            const parts = [
+              item.name ? `Business / Organization: ${item.name}` : '',
+              item.description ? `About: ${item.description}` : '',
+              item.telephone ? `Phone: ${item.telephone}` : '',
+              item.email ? `Email: ${item.email}` : '',
+              item.address ? `Address: ${typeof item.address === 'string' ? item.address : [item.address.streetAddress, item.address.addressLocality, item.address.addressRegion, item.address.postalCode].filter(Boolean).join(', ')}` : '',
+              item.priceRange ? `Price Range: ${item.priceRange}` : '',
+            ].filter(Boolean);
+            if (parts.length > 0) structuredKnowledgeBlocks.push(parts.join('\n'));
+          }
+          // FAQs
+          if (item['@type'] === 'FAQPage' && Array.isArray(item.mainEntity)) {
+            for (const faq of item.mainEntity) {
+              const q = faq.name || faq.question;
+              const a = faq.acceptedAnswer?.text || faq.answer;
+              if (q && a) {
+                structuredKnowledgeBlocks.push(`FAQ Question: ${q}\nFAQ Answer: ${String(a).replace(/<[^>]+>/g, ' ').trim()}`);
+              }
+            }
+          }
+          // Products / Courses / Services
+          if (item['@type'] === 'Product' || item['@type'] === 'Course' || item['@type'] === 'Service') {
+            const pName = item.name || item.title;
+            const pDesc = item.description || '';
+            const pPrice = item.offers?.price ? `${item.offers?.priceCurrency || ''} ${item.offers?.price}` : '';
+            const pDetails = [
+              pName ? `Offering / Product: ${pName}` : '',
+              pDesc ? `Description: ${pDesc}` : '',
+              pPrice ? `Pricing: ${pPrice}` : '',
+            ].filter(Boolean).join('\n');
+            if (pDetails) structuredKnowledgeBlocks.push(pDetails);
+          }
+        }
+      } catch {}
+    });
+
+    // 2. Extract Next.js / React SPA preloaded state if available
+    let spaPreloadedText = '';
+    $('script#__NEXT_DATA__').each((_, el) => {
+      try {
+        const jsonText = $(el).text();
+        const parsed = JSON.parse(jsonText);
+        const pageProps = parsed?.props?.pageProps;
+        if (pageProps && typeof pageProps === 'object') {
+          const strings: string[] = [];
+          const walk = (obj: any, depth = 0) => {
+            if (depth > 5 || !obj) return;
+            if (typeof obj === 'string') {
+              const s = obj.trim();
+              if (s.length > 25 && s.length < 1500 && !s.startsWith('http') && !s.includes('{') && !s.includes('class=')) {
+                strings.push(s);
+              }
+            } else if (Array.isArray(obj)) {
+              for (const it of obj) walk(it, depth + 1);
+            } else if (typeof obj === 'object') {
+              for (const k of Object.keys(obj)) walk(obj[k], depth + 1);
+            }
+          };
+          walk(pageProps);
+          if (strings.length > 0) {
+            spaPreloadedText = Array.from(new Set(strings)).join('\n\n');
+          }
+        }
+      } catch {}
+    });
+
+    // 3. Extract structured properties only if real estate or listing markup exists
     const structuredProperties = isRealEstate ? this.extractPropertiesFromDom($, url) : [];
 
-    // 2. Extract page metadata
+    // 4. Extract page metadata
     const pageLevelMetadata = this.extractPageLevelMetadata($, url);
     if (structuredProperties.length > 0) {
       pageLevelMetadata.properties = structuredProperties;
     }
 
-    // 3. Convert HTML tables into readable text blocks before removing tags
+    // 5. Convert HTML tables into readable text blocks before removing tags
     $('table').each((_, tbl) => {
       const rows: string[] = [];
       $(tbl).find('tr').each((_, tr) => {
@@ -287,32 +417,82 @@ export class CrawlerService {
         if (cells.length > 0) rows.push(cells.join(' | '));
       });
       if (rows.length > 0) {
-        $(tbl).replaceWith(`\n${rows.join('\n')}\n`);
+        $(tbl).replaceWith(`\n\n[Table Content]\n${rows.join('\n')}\n\n`);
       }
     });
 
-    // 4. Remove boilerplate elements, navigation menus, sidebars, and filter dropdowns
+    // 6. Format headings, FAQs, accordions, and lists with proper semantic spacing before tag removal
+    // Details & Summary (expandable FAQs / disclosures)
+    $('summary').each((_, el) => {
+      const sText = $(el).text().trim().replace(/\s+/g, ' ');
+      if (sText.length > 1) {
+        $(el).replaceWith(`\n\n### ${sText}\n`);
+      }
+    });
+
+    // Accordions and collapsible headers (Bootstrap, Tailwind, Elementor, custom accordions)
+    $('.accordion-button, .accordion-header, [data-bs-toggle="collapse"], .collapse-title, .faq-question, .accordion-title').each((_, el) => {
+      const aText = $(el).text().trim().replace(/\s+/g, ' ');
+      if (aText.length > 2 && !aText.startsWith('###')) {
+        $(el).replaceWith(`\n\n### ${aText}\n`);
+      }
+    });
+
+    // Definition lists (<dt> / <dd>)
+    $('dt').each((_, el) => {
+      const dtText = $(el).text().trim().replace(/\s+/g, ' ');
+      if (dtText.length > 1) {
+        $(el).replaceWith(`\n\n• **${dtText}**: `);
+      }
+    });
+
+    $('dd').each((_, el) => {
+      const ddText = $(el).text().trim().replace(/\s+/g, ' ');
+      if (ddText.length > 1) {
+        $(el).replaceWith(`${ddText}\n`);
+      }
+    });
+
+    $('h1, h2, h3, h4, h5, h6').each((_, el) => {
+      const hText = $(el).text().trim().replace(/\s+/g, ' ');
+      if (hText.length > 1) {
+        $(el).replaceWith(`\n\n### ${hText}\n`);
+      }
+    });
+
+    $('li').each((_, el) => {
+      const liText = $(el).text().trim().replace(/\s+/g, ' ');
+      if (liText.length > 1) {
+        $(el).replaceWith(`\n• ${liText}\n`);
+      }
+    });
+
+    $('p, blockquote').each((_, el) => {
+      const pText = $(el).text().trim().replace(/\s+/g, ' ');
+      if (pText.length > 1) {
+        $(el).replaceWith(`\n\n${pText}\n`);
+      }
+    });
+
+    // 7. Remove non-content elements (scripts, styles, tracking, popups, cookie banners)
     $(
-      'script, style, noscript, nav, footer, header, svg, iframe, form, aside, ' +
-      '.sidebar, .widget, .filter, .filters, .dropdown, .menu, .breadcrumbs, ' +
-      '.pagination, .search, .elementor-widget-nav-menu, .elementor-location-header, ' +
-      '.elementor-location-footer, .cookie-banner, .popup, select, option, button, ' +
-      '.search-form, .navbar, #menu-main-menu'
+      'script, style, noscript, svg, iframe, canvas, ' +
+      '.cookie-banner, .cookie-notice, .popup, .modal-backdrop, .search-form, ' +
+      '.elementor-location-header, .elementor-location-footer, #menu-main-menu'
     ).remove();
 
     const title = ($('title').text() || $('h1').first().text() || 'Website Page').trim().replace(/\s+/g, ' ');
     const metaDescription = $('meta[name="description"]').attr('content') || $('meta[property="og:description"]').attr('content') || '';
 
     const headings: string[] = [];
-    $('h1, h2, h3, h4').each((_, el) => {
-      const hText = $(el).text().trim().replace(/\s+/g, ' ');
-      if (hText.length > 2 && hText.length < 150) {
-        headings.push(hText);
-      }
+    rawHtml.replace(/<h[1-4][^>]*>(.*?)<\/h[1-4]>/gi, (_, h) => {
+      const cleanH = h.replace(/<[^>]+>/g, '').trim();
+      if (cleanH.length > 2 && cleanH.length < 150) headings.push(cleanH);
+      return '';
     });
 
     // Clean body text
-    const extractedText = $('body')
+    let extractedText = $('body')
       .text()
       .replace(/(\r\n|\n|\r)/gm, '\n')
       .replace(/[ \t]+/g, ' ')
@@ -326,6 +506,20 @@ export class CrawlerService {
       .join('\n')
       .replace(/\n\s*\n+/g, '\n\n')
       .trim();
+
+    // If body text is sparse (< 100 chars), combine with JSON-LD and SPA preloaded data
+    if (extractedText.length < 100 || structuredKnowledgeBlocks.length > 0 || spaPreloadedText.length > 0) {
+      const combinedSections = [
+        extractedText.length > 30 ? extractedText : '',
+        structuredKnowledgeBlocks.join('\n\n'),
+        spaPreloadedText,
+        metaDescription ? `Summary: ${metaDescription}` : '',
+      ].filter(Boolean);
+
+      if (combinedSections.length > 0) {
+        extractedText = combinedSections.join('\n\n---\n\n').trim();
+      }
+    }
 
     const contentHash = generateContentHash(extractedText);
 

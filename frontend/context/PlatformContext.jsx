@@ -381,6 +381,7 @@ export const PlatformProvider = ({ children }) => {
         url: sourceUrl,
         title: sourceData.title,
         type: sourceData.type || 'url',
+        content: sourceData.content || sourceData.text || sourceData.summary || sourceData.extractedSummary,
         summary: sourceData.summary || sourceData.extractedSummary,
       });
     } catch (err) {

@@ -454,8 +454,8 @@ ${safeUserMessage}
 ${safeGroundedContext}
 
 ${isRealEstate 
-  ? `Please respond concisely in 1-2 brief paragraphs (under 90 words) strictly based on the verified website knowledge above for ${botName}.${isPrycoons ? ' Highlight top matching properties with bold names (e.g. **Ananta**).' : ' Highlight verified properties or services from the knowledge base.'}` 
-  : `Answer the user's question directly, accurately, and concisely in 1-2 brief sentences (strictly under 60-70 words) based strictly on the verified website knowledge above for ${botName}. Get straight to the answer without lengthy preambles, do not dump bullet points or raw metadata labels, and do not repeat system descriptions. If the information is not in the knowledge base, state that simply in one sentence.`}
+  ? `Please respond helpfully and concisely in 1-2 brief paragraphs strictly based on the verified website knowledge above for ${botName}.${isPrycoons ? ' Highlight top matching properties with bold names (e.g. **Ananta**).' : ' Highlight verified properties or services from the knowledge base.'}` 
+  : `Answer the user's question directly, accurately, and helpfully using the verified website knowledge above for ${botName}. Be concise and clear (typically 80-150 words). You may use bullet points or brief paragraphs if listing multiple items, pricing tiers, or requirements. Do not dump raw system metadata labels. If the information requested is genuinely not in the verified knowledge above, clearly state that this detail is not available in your records.`}
 Do NOT include raw source tags like [Source 1: ...].
 `.trim()
           : `
@@ -565,38 +565,45 @@ ${isPrycoons ? 'Provide expert, helpful real estate guidance relevant to Ahmedab
           .filter(Boolean);
 
         // 3. Extract query search terms (ignoring common stop words)
-        const stopWords = new Set(['what', 'is', 'the', 'of', 'in', 'for', 'and', 'or', 'a', 'an', 'to', 'your', 'our', 'are', 'you', 'can', 'i', 'me', 'how', 'do', 'does', 'tell', 'about', 'give', 'any']);
+        const stopWords = new Set(['what', 'is', 'the', 'of', 'in', 'for', 'and', 'or', 'a', 'an', 'to', 'your', 'our', 'are', 'you', 'can', 'i', 'me', 'how', 'do', 'does', 'tell', 'about', 'give', 'any', 'there', 'with', 'from', 'have']);
         const queryTerms = msg.replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter((w) => w.length > 2 && !stopWords.has(w));
 
+        const isSpecificQuestion = /\b(do you|does|is there|are there|can i|how do|what is|what are|where is|when does|provide|offer|available|policy)\b/i.test(msg) || msg.includes('?');
         const isPriceQuery = /\b(price|pricing|cost|fee|fees|charges|rate|how much)\b/i.test(msg);
         const isTimeQuery = /\b(time|timing|hours|hour|schedule|open|close|when|days)\b/i.test(msg);
         const isServiceQuery = /\b(services?|treatment|treatments?|offer|product|what do you do)\b/i.test(msg);
         const isContactQuery = /\b(contact|email|phone|call|reach|number|address|where|location)\b/i.test(msg);
 
-        // Score each informative sentence
+        // Score each informative sentence based on keyword match density
         const scoredLines = informativeLines.map((line) => {
           let score = 0;
           const lineLower = line.toLowerCase();
-          for (const t of queryTerms) {
-            if (lineLower.includes(t)) score += 4;
-          }
+          const matchedTerms = queryTerms.filter((t) => lineLower.includes(t));
+          score += matchedTerms.length * 5;
+
           if (isPriceQuery && (line.includes('₹') || line.includes('$') || /\b(cost|price|fee|pricing|charges)\b/i.test(lineLower))) {
-            score += 6;
+            score += matchedTerms.length > 0 ? 5 : 0;
           }
           if (isTimeQuery && /\b(\d{1,2}(?::\d{2})?\s*(?:am|pm)|hours|timing|schedule|monday|sunday|saturday|daily)\b/i.test(lineLower)) {
-            score += 6;
+            score += matchedTerms.length > 0 ? 5 : 0;
           }
           if (isServiceQuery && /\b(provides|offers|treatment|surgery|service|care|solutions|programs)\b/i.test(lineLower)) {
-            score += 4;
+            score += matchedTerms.length > 0 ? 3 : 0;
           }
           if (isContactQuery && /\b(https?:\/\/|@|phone|call|\+\d{2}|\b\d{10}\b|located|address)\b/i.test(lineLower)) {
-            score += 5;
+            score += matchedTerms.length > 0 ? 4 : 0;
           }
-          return { line, score };
+          return { line, score, matchCount: matchedTerms.length };
         });
 
         scoredLines.sort((a, b) => b.score - a.score);
-        const bestMatches = scoredLines.filter((sl) => sl.score > 0);
+
+        // A valid match must meet minimum keyword overlap:
+        // - if queryTerms has 1 word: must match that word
+        // - if queryTerms has 2-3 words: must match at least 2 words (or 1 if total terms is 2)
+        // - if queryTerms has >=4 words: must match at least 2 distinct words
+        const minMatchesNeeded = queryTerms.length <= 1 ? 1 : queryTerms.length <= 2 ? 1 : 2;
+        const bestMatches = scoredLines.filter((sl) => sl.matchCount >= minMatchesNeeded && sl.score > 0);
 
         if (bestMatches.length > 0) {
           // Return the 1-2 most relevant matching statements directly without lengthy filler
@@ -605,7 +612,12 @@ ${isPrycoons ? 'Provide expert, helpful real estate guidance relevant to Ahmedab
           return `Based on our verified website records:\n\n${directAnswer}`;
         }
 
-        // If general query and we have informative lines, output concise overview (under 50 words)
+        // If the user asked a specific question and the knowledge is genuinely not present in our records:
+        if (isSpecificQuestion && queryTerms.length >= 2) {
+          return `I do not have information regarding that in our current website records or documentation. Would you like to share your contact details or reach out to our team directly so we can check this for you?`;
+        }
+
+        // If general greeting or overview query, output concise overview (under 50 words)
         if (informativeLines.length > 0) {
           const overview = informativeLines.slice(0, 2).join(' ');
           return `At ${botName}, ${overview}`;

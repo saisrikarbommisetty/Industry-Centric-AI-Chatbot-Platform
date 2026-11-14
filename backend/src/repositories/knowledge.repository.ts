@@ -491,7 +491,16 @@ export class KnowledgeRepository {
       }
     }
 
-    return Array.from(memoryChunks.values()).filter((c) => targetProjectIds.includes(c.projectId));
+    return Array.from(memoryChunks.values())
+      .filter((c) => targetProjectIds.includes(c.projectId))
+      .map((c) => {
+        const parentDoc = memoryDocuments.get(c.documentId);
+        return {
+          ...c,
+          sourceTitle: parentDoc?.title || c.metadata?.projectName || c.metadata?.title || 'Knowledge Base',
+          sourceUrl: parentDoc?.url || c.metadata?.sourceUrl || c.metadata?.url || '',
+        };
+      });
   }
 }
 

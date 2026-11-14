@@ -84,29 +84,125 @@ Verified Details: Official listing from ${botConfig?.botName || 'our website'}.
       }
     }
 
-    // 2. Also chunk the general page overview / introductory text
+    // 2. Chunk general page text preserving semantic structure, tables, and section headings
     const text = page.extractedText;
-    const rawParagraphs = text
+    const rawBlocks = text
       .split(/\n\s*\n/)
       .map((p) => p.trim())
-      .filter((p) => p.length > 30 && !p.startsWith('Under Construction Rera Approved')); // avoid duplicating extracted listing cards
+      .filter((p) => p.length > 20 && !p.startsWith('Under Construction Rera Approved'));
 
-    // Break down oversized paragraphs so a single paragraph never balloons a chunk
-    const paragraphs: string[] = [];
-    for (const p of rawParagraphs) {
-      if (p.length > this.targetChunkSize * 2) {
-        for (let i = 0; i < p.length; i += this.targetChunkSize) {
-          const slice = p.slice(i, i + this.targetChunkSize).trim();
-          if (slice.length > 25) {
-            paragraphs.push(slice);
+    // Break down oversized blocks while preserving tables, lists, and FAQs
+    const semanticBlocks: Array<{ text: string; sectionHeading?: string; isTable?: boolean }> = [];
+    let currentSectionHeading = '';
+
+    for (const block of rawBlocks) {
+      // Check for section headings
+      const headingMatch = block.match(/###\s+([^\n]+)/);
+      if (headingMatch) {
+        currentSectionHeading = headingMatch[1].trim();
+      }
+
+      // Handle Tables: split by rows, keeping table headers intact on each split
+      if (block.includes('[Table Content]')) {
+        const tableLines = block.split('\n').map((l) => l.trim()).filter(Boolean);
+        if (tableLines.length >= 3 && block.length > this.targetChunkSize) {
+          // tableLines[0] is [Table Content], tableLines[1] is Header Row
+          const tableTag = tableLines[0];
+          const headerRow = tableLines[1];
+          const dataRows = tableLines.slice(2);
+
+          let currentTableChunkRows: string[] = [];
+          let currentTableChars = 0;
+
+          for (const row of dataRows) {
+            if (currentTableChars + row.length > this.targetChunkSize && currentTableChunkRows.length > 0) {
+              semanticBlocks.push({
+                text: `${tableTag}\n${headerRow}\n${currentTableChunkRows.join('\n')}`,
+                sectionHeading: currentSectionHeading,
+                isTable: true,
+              });
+              currentTableChunkRows = [row];
+              currentTableChars = row.length;
+            } else {
+              currentTableChunkRows.push(row);
+              currentTableChars += row.length;
+            }
+          }
+          if (currentTableChunkRows.length > 0) {
+            semanticBlocks.push({
+              text: `${tableTag}\n${headerRow}\n${currentTableChunkRows.join('\n')}`,
+              sectionHeading: currentSectionHeading,
+              isTable: true,
+            });
+          }
+          continue;
+        }
+      }
+
+      // Handle Bulleted Lists: split by items rather than raw character slicing
+      if (block.includes('• ') && block.length > this.targetChunkSize) {
+        const items = block.split(/\n(?=• )/).map((it) => it.trim()).filter(Boolean);
+        let listGroup: string[] = [];
+        let listGroupChars = 0;
+
+        for (const item of items) {
+          if (listGroupChars + item.length > this.targetChunkSize && listGroup.length > 0) {
+            semanticBlocks.push({
+              text: listGroup.join('\n'),
+              sectionHeading: currentSectionHeading,
+            });
+            listGroup = [item];
+            listGroupChars = item.length;
+          } else {
+            listGroup.push(item);
+            listGroupChars += item.length;
           }
         }
-      } else {
-        paragraphs.push(p);
+        if (listGroup.length > 0) {
+          semanticBlocks.push({
+            text: listGroup.join('\n'),
+            sectionHeading: currentSectionHeading,
+          });
+        }
+        continue;
       }
+
+      // Generic large text blocks: split by sentence boundaries instead of arbitrary character offsets
+      if (block.length > this.targetChunkSize * 1.5) {
+        const sentences = block.split(/(?<=[.?!])\s+/);
+        let sentenceGroup: string[] = [];
+        let sentenceGroupChars = 0;
+
+        for (const s of sentences) {
+          if (sentenceGroupChars + s.length > this.targetChunkSize && sentenceGroup.length > 0) {
+            semanticBlocks.push({
+              text: sentenceGroup.join(' '),
+              sectionHeading: currentSectionHeading,
+            });
+            sentenceGroup = [s];
+            sentenceGroupChars = s.length;
+          } else {
+            sentenceGroup.push(s);
+            sentenceGroupChars += s.length;
+          }
+        }
+        if (sentenceGroup.length > 0) {
+          semanticBlocks.push({
+            text: sentenceGroup.join(' '),
+            sectionHeading: currentSectionHeading,
+          });
+        }
+        continue;
+      }
+
+      semanticBlocks.push({
+        text: block,
+        sectionHeading: currentSectionHeading,
+      });
     }
 
     let currentChunk = '';
+    let activeChunkSection = '';
     const sectionMetadata = {
       title: page.title,
       sourceUrl: page.url,
@@ -114,27 +210,42 @@ Verified Details: Official listing from ${botConfig?.botName || 'our website'}.
       location: page.metadata?.location || (isPrycoons ? 'Ahmedabad' : ''),
       propertyType: page.metadata?.propertyType || '',
     };
+    const pageHeader = page.title && page.title !== 'Website Page' && !page.title.includes('.local') ? `[Page: ${page.title}]\n` : '';
 
-    for (const para of paragraphs) {
-      if ((currentChunk + '\n\n' + para).length > this.targetChunkSize && currentChunk.length > 0) {
+    for (const b of semanticBlocks) {
+      if ((currentChunk + '\n\n' + b.text).length > this.targetChunkSize && currentChunk.length > 0) {
+        const rawContent = currentChunk.trim();
+        const sectionPrefix = activeChunkSection && !rawContent.includes(activeChunkSection) ? `[Section: ${activeChunkSection}]\n` : '';
+        const contextualContent = `${pageHeader}${sectionPrefix}${rawContent}`.slice(0, 1400);
+
         chunks.push({
-          content: currentChunk.trim().slice(0, 1200),
-          metadata: { ...sectionMetadata },
+          content: contextualContent,
+          metadata: { ...sectionMetadata, section: activeChunkSection },
           chunkIndex: chunkIndex++,
         });
 
-        // Retain overlap from end of previous chunk
-        const words = currentChunk.split(/\s+/);
-        currentChunk = words.slice(-Math.min(15, words.length)).join(' ') + '\n\n' + para;
+        // Retain overlap from end of previous chunk if not a table
+        if (!b.isTable) {
+          const words = currentChunk.split(/\s+/);
+          currentChunk = words.slice(-Math.min(15, words.length)).join(' ') + '\n\n' + b.text;
+        } else {
+          currentChunk = b.text;
+        }
+        activeChunkSection = b.sectionHeading || '';
       } else {
-        currentChunk = currentChunk ? `${currentChunk}\n\n${para}` : para;
+        currentChunk = currentChunk ? `${currentChunk}\n\n${b.text}` : b.text;
+        if (b.sectionHeading) activeChunkSection = b.sectionHeading;
       }
     }
 
-    if (currentChunk.trim().length > 30) {
+    if (currentChunk.trim().length > 25) {
+      const rawContent = currentChunk.trim();
+      const sectionPrefix = activeChunkSection && !rawContent.includes(activeChunkSection) ? `[Section: ${activeChunkSection}]\n` : '';
+      const contextualContent = `${pageHeader}${sectionPrefix}${rawContent}`.slice(0, 1400);
+
       chunks.push({
-        content: currentChunk.trim().slice(0, 1200),
-        metadata: { ...sectionMetadata },
+        content: contextualContent,
+        metadata: { ...sectionMetadata, section: activeChunkSection },
         chunkIndex: chunkIndex++,
       });
     }

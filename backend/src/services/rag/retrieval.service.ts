@@ -28,6 +28,12 @@ export class RetrievalService {
   private cache: Map<string, { results: RetrievedChunkResult[]; timestamp: number }> = new Map();
   private readonly CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes cache
 
+  private queryEmbeddingCache: Map<string, { embedding: number[]; timestamp: number }> = new Map();
+  private readonly EMBEDDING_CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour embedding cache
+
+  private allChunksCache: Map<string, { chunks: any[]; timestamp: number }> = new Map();
+  private readonly CHUNKS_CACHE_TTL_MS = 5 * 60 * 1000;
+
   private propertyChunksCache: Map<string, { chunks: any[]; timestamp: number }> = new Map();
   private readonly PROPERTY_CACHE_TTL_MS = 10 * 60 * 1000;
 
@@ -44,13 +50,43 @@ export class RetrievalService {
   invalidateCache(projectId?: string) {
     if (projectId) {
       this.propertyChunksCache.delete(projectId);
+      this.allChunksCache.delete(projectId);
       for (const [key] of this.cache) {
         if (key.startsWith(projectId)) this.cache.delete(key);
       }
     } else {
       this.propertyChunksCache.clear();
+      this.allChunksCache.clear();
       this.cache.clear();
+      this.queryEmbeddingCache.clear();
     }
+  }
+
+  /**
+   * Fast, cached query embedding with safe timeout
+   */
+  async getQueryEmbeddingWithCache(query: string): Promise<number[]> {
+    const qNorm = query.trim().toLowerCase();
+    const cached = this.queryEmbeddingCache.get(qNorm);
+    if (cached && Date.now() - cached.timestamp < this.EMBEDDING_CACHE_TTL_MS) {
+      return cached.embedding;
+    }
+
+    try {
+      const embedding = await Promise.race([
+        embeddingService.generateEmbedding(query),
+        new Promise<number[]>((_, reject) =>
+          setTimeout(() => reject(new Error('Embedding generation timeout')), 2500)
+        ),
+      ]);
+      if (embedding && embedding.length > 0) {
+        this.queryEmbeddingCache.set(qNorm, { embedding, timestamp: Date.now() });
+        return embedding;
+      }
+    } catch (err: any) {
+      logger.warn(`Query embedding notice for "${query.slice(0, 40)}": ${err.message}. Using resilient hybrid semantic search.`);
+    }
+    return [];
   }
 
   /**
@@ -174,18 +210,8 @@ export class RetrievalService {
       return cached.results;
     }
 
-    // 1. Generate query embedding with fast timeout (capped at 750ms)
-    let queryEmbedding: number[] = [];
-    try {
-      queryEmbedding = await Promise.race([
-        embeddingService.generateEmbedding(query),
-        new Promise<number[]>((_, reject) =>
-          setTimeout(() => reject(new Error('Embedding generation timeout')), 750)
-        ),
-      ]);
-    } catch (err: any) {
-      logger.warn(`Fast query embedding timeout (${err.message}). Using fallback semantic matching.`);
-    }
+    // 1. Generate query embedding with fast cache and resilient timeout
+    const queryEmbedding = await this.getQueryEmbeddingWithCache(query);
 
     // 2. Fetch candidates from vector retrieval scoped strictly to projectId
     let candidates: any[] = [];
@@ -194,32 +220,38 @@ export class RetrievalService {
         candidates = await knowledgeRepository.findSimilarChunks(
           projectId,
           queryEmbedding,
-          k * 2,
+          k * 3,
           this.similarityThreshold
         );
       } catch (err: any) {
-        logger.warn(`Vector search error: ${err.message}`);
+        logger.warn(`Vector search error for project ${projectId}: ${err.message}`);
       }
+    }
+
+    // 3. Fetch project chunks from cache or DB to combine with lexical & property search
+    let allProjectChunks: any[] = [];
+    try {
+      const cachedChunks = this.allChunksCache.get(projectId);
+      if (cachedChunks && Date.now() - cachedChunks.timestamp < this.CHUNKS_CACHE_TTL_MS) {
+        allProjectChunks = cachedChunks.chunks;
+      } else {
+        allProjectChunks = await knowledgeRepository.getAllChunks(projectId);
+        this.allChunksCache.set(projectId, { chunks: allProjectChunks, timestamp: Date.now() });
+      }
+    } catch (err: any) {
+      logger.warn(`Error fetching all chunks for project ${projectId}: ${err.message}`);
     }
 
     // Augment candidates with verified property chunks only for real estate bots
     if (isRealEstate) {
       try {
-        let propertyChunks: any[] = [];
-        const propCached = this.propertyChunksCache.get(projectId);
-        if (propCached && Date.now() - propCached.timestamp < this.PROPERTY_CACHE_TTL_MS) {
-          propertyChunks = propCached.chunks;
-        } else {
-          const allChunks = await knowledgeRepository.getAllChunks(projectId);
-          propertyChunks = allChunks.filter((chunk) => {
-            const rawMeta = chunk.metadata;
-            const meta = typeof rawMeta === 'string' ? JSON.parse(rawMeta) : (rawMeta || {});
-            return Boolean(meta.projectName || (chunk.content && /Project:\s*\S+/i.test(chunk.content)));
-          });
-          this.propertyChunksCache.set(projectId, { chunks: propertyChunks, timestamp: Date.now() });
-        }
+        const propertyChunks = allProjectChunks.filter((chunk) => {
+          const rawMeta = chunk.metadata;
+          const meta = typeof rawMeta === 'string' ? JSON.parse(rawMeta) : (rawMeta || {});
+          return Boolean(meta.projectName || (chunk.content && /Project:\s*\S+/i.test(chunk.content)));
+        });
 
-        // If a specific locality was requested, prioritize and isolate chunks from that locality!
+        // If a specific locality was requested, prioritize and isolate chunks from that locality
         const relevantPropertyChunks = targetLoc && targetLoc !== 'Ahmedabad'
           ? propertyChunks.filter((chunk) => {
               const rawMeta = chunk.metadata;
@@ -250,18 +282,35 @@ export class RetrievalService {
       }
     }
 
-    // If still no candidates, fallback to all chunks of this project
-    if (candidates.length === 0) {
-      candidates = await knowledgeRepository.getAllChunks(projectId);
+    // Ensure candidate pool includes project chunks for comprehensive lexical scoring
+    const existingCandidateIds = new Set(candidates.map((c) => c.id));
+    for (const chunk of allProjectChunks) {
+      if (!existingCandidateIds.has(chunk.id)) {
+        candidates.push({
+          ...chunk,
+          similarity: 0.25,
+        });
+        existingCandidateIds.add(chunk.id);
+      }
     }
 
-    // 3. Score & rerank with Hybrid Filtering
+    // 4. Score & rerank with Hybrid Filtering
     const scoredList: RetrievedChunkResult[] = [];
     const qLower = query.toLowerCase();
-    const queryTokens = qLower.replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter((w) => w.length > 2);
+
+    const stopWords = new Set([
+      'what', 'is', 'the', 'a', 'an', 'are', 'was', 'were', 'you', 'your', 'our', 'we', 'i', 'me', 'my',
+      'it', 'its', 'in', 'on', 'at', 'to', 'for', 'of', 'and', 'or', 'do', 'does', 'did', 'can', 'could',
+      'how', 'why', 'when', 'where', 'which', 'who', 'whom', 'this', 'that', 'these', 'those', 'there',
+      'have', 'has', 'had', 'tell', 'show', 'give', 'about', 'any', 'some', 'please', 'know', 'much', 'like'
+    ]);
+
+    const rawTokens = qLower.replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter((w) => w.length > 1);
+    const significantTokens = rawTokens.filter((w) => !stopWords.has(w) && w.length > 2);
+    const searchTokens = significantTokens.length > 0 ? significantTokens : rawTokens;
 
     for (const c of candidates) {
-      let score = c.similarity || 0.4;
+      let score = c.similarity || 0.35;
       const contentLower = (c.content || '').toLowerCase();
       const rawMeta = c.metadata;
       let meta: Record<string, any> = {};
@@ -277,15 +326,11 @@ export class RetrievalService {
 
       if (isRealEstate) {
         const hasProject = Boolean(meta.projectName || /Project:\s*\S+/i.test(contentLower));
-
-        // Property chunk boost: prioritize actual property listings over general web text
-        if (hasProject) {
-          score += 0.35;
-        }
+        if (hasProject) score += 0.35;
 
         // Match Project Name
         if (filters.projectName && (contentLower.includes(filters.projectName) || (meta.projectName || '').toLowerCase().includes(filters.projectName))) {
-          score += 0.45;
+          score += 0.55;
         }
 
         // Match Location
@@ -297,23 +342,19 @@ export class RetrievalService {
             new RegExp(`\\b${targetLoc.replace(/\s+/g, '\\s+')}\\b`, 'i').test(contentLower);
 
           if (matchesTargetLoc) {
-            score += 0.80; // High boost for matching requested locality
-          } else if (
-            chunkLoc &&
-            chunkLoc.toLowerCase() !== targetLower &&
-            chunkLoc.toLowerCase() !== 'ahmedabad'
-          ) {
+            score += 0.80;
+          } else if (chunkLoc && chunkLoc.toLowerCase() !== targetLower && chunkLoc.toLowerCase() !== 'ahmedabad') {
             const isChunkLocInQuery = new RegExp(`\\b${chunkLoc.toLowerCase().replace(/\\s+/g, '\\s+')}\\b`, 'i').test(qLower);
             if (isChunkLocInQuery) {
-              score += 0.80; // Boost when user asked for multiple localities (e.g. "Gota or Science City")
+              score += 0.80;
             } else {
-              score -= 2.0; // Heavy penalty for chunks that belong to a DIFFERENT locality
+              score -= 2.0;
             }
           }
         } else if (filters.location) {
           const locLower = filters.location.toLowerCase();
           if (contentLower.includes(locLower) || (meta.location || '').toLowerCase().includes(locLower) || (meta.city || '').toLowerCase().includes(locLower)) {
-            score += 0.30;
+            score += 0.35;
           }
         }
 
@@ -321,7 +362,7 @@ export class RetrievalService {
         if (filters.propertyType) {
           const typeLower = filters.propertyType.toLowerCase();
           if (contentLower.includes(typeLower) || (meta.propertyType || '').toLowerCase().includes(typeLower) || (meta.bhk || '').toLowerCase().includes(typeLower)) {
-            score += 0.25;
+            score += 0.30;
           }
         }
 
@@ -330,17 +371,17 @@ export class RetrievalService {
           if (meta.priceNum <= filters.budgetMaxLakhs * 1.05) {
             score += 0.20;
           } else {
-            score -= 0.35; // penalize if over budget
+            score -= 0.35;
           }
         }
 
-        // Keyword overlap boost
-        let matchedTokens = 0;
-        for (const token of queryTokens) {
-          if (contentLower.includes(token)) matchedTokens++;
+        // Token matches
+        let matched = 0;
+        for (const t of searchTokens) {
+          if (contentLower.includes(t)) matched++;
         }
-        if (queryTokens.length > 0) {
-          score += (matchedTokens / queryTokens.length) * 0.20;
+        if (searchTokens.length > 0) {
+          score += (matched / searchTokens.length) * 0.40;
         }
 
         const defaultTitle = isPrycoons ? 'Prycoons Real Estate Records' : `${botConfig?.botName || 'Business'} Knowledge Base`;
@@ -357,54 +398,96 @@ export class RetrievalService {
         });
       } else {
         // Multi-Industry / General Bot scoring
-        // Expand search tokens with common inquiry synonyms
-        const expandedTokens = new Set<string>(queryTokens);
-        if (queryTokens.some((t) => ['price', 'pricing', 'cost', 'fee', 'charge', 'rate', 'much', 'expensive', 'cheap'].includes(t))) {
-          ['price', 'cost', 'fee', 'charges', 'rate', '₹', '$'].forEach((w) => expandedTokens.add(w));
-        }
-        if (queryTokens.some((t) => ['time', 'timing', 'hours', 'hour', 'schedule', 'open', 'close', 'when', 'days'].includes(t))) {
-          ['hours', 'timing', 'time', 'schedule', 'open', 'closed', 'am', 'pm', 'monday', 'sunday'].forEach((w) => expandedTokens.add(w));
-        }
-        if (queryTokens.some((t) => ['service', 'services', 'offer', 'treatment', 'treatments', 'product', 'products', 'do', 'help', 'provide'].includes(t))) {
-          ['service', 'services', 'offer', 'provides', 'treatment', 'treatments', 'solutions', 'care'].forEach((w) => expandedTokens.add(w));
-        }
-        if (queryTokens.some((t) => ['contact', 'reach', 'phone', 'call', 'email', 'number', 'address', 'where', 'location'].includes(t))) {
-          ['contact', 'phone', 'email', 'call', 'reach', 'website', 'address', 'located'].forEach((w) => expandedTokens.add(w));
+        // Expand search tokens with multi-industry inquiry synonyms and morphological stems
+        const expandedTokens = new Set<string>();
+        for (const t of searchTokens) {
+          expandedTokens.add(t);
+          // Add morphological stems
+          if (t.endsWith('ies') && t.length > 4) expandedTokens.add(t.slice(0, -3) + 'y');
+          else if (t.endsWith('es') && t.length > 4) expandedTokens.add(t.slice(0, -2));
+          else if (t.endsWith('s') && !t.endsWith('ss') && t.length > 3) expandedTokens.add(t.slice(0, -1));
+          if (t.endsWith('ing') && t.length > 5) expandedTokens.add(t.slice(0, -3));
+          if (t.endsWith('ed') && t.length > 4) expandedTokens.add(t.slice(0, -2));
+          if (t.endsWith('tion') && t.length > 6) expandedTokens.add(t.slice(0, -4));
+          if (t.endsWith('ment') && t.length > 6) expandedTokens.add(t.slice(0, -4));
+          if (t.endsWith('ity') && t.length > 5) expandedTokens.add(t.slice(0, -3));
         }
 
-        let matchedTokens = 0;
+        // Pricing, Fees, Tuition, and Scholarships synonyms
+        if (searchTokens.some((t) => ['price', 'pricing', 'cost', 'fee', 'fees', 'charge', 'rate', 'tuition', 'budget', 'scholarship', 'grant', 'aid', 'discount', 'installment', 'emi', 'pay', 'payment'].some((w) => t.includes(w) || w.includes(t)))) {
+          ['price', 'cost', 'fee', 'fees', 'charges', 'rate', 'tuition', 'scholarship', 'scholarships', 'grant', 'grants', 'financial aid', 'discount', 'installment', 'emi', 'payment', '₹', '$', 'usd', 'inr', 'annual'].forEach((w) => expandedTokens.add(w));
+        }
+
+        // Timing, Schedule, Duration, and Batch hours
+        if (searchTokens.some((t) => ['time', 'timing', 'hours', 'hour', 'schedule', 'open', 'close', 'when', 'days', 'weeks', 'months', 'weekend', 'batch', 'duration'].some((w) => t.includes(w) || w.includes(t)))) {
+          ['hours', 'timing', 'timings', 'time', 'schedule', 'batch', 'batches', 'duration', 'open', 'closed', 'am', 'pm', 'monday', 'sunday', 'daily', 'weekend', 'morning', 'evening', 'weeks', 'months'].forEach((w) => expandedTokens.add(w));
+        }
+
+        // Admissions, Eligibility, Requirements, and Application
+        if (searchTokens.some((t) => ['admission', 'admissions', 'apply', 'application', 'eligible', 'eligibility', 'qualify', 'qualification', 'requirement', 'requirements', 'prerequisite', 'prerequisites', 'criteria', 'enroll', 'enrollment', 'register', 'registration'].some((w) => t.includes(w) || w.includes(t)))) {
+          ['admission', 'admissions', 'apply', 'application', 'applicant', 'eligible', 'eligibility', 'qualify', 'qualification', 'qualifications', 'prerequisite', 'prerequisites', 'requirement', 'requirements', 'criteria', 'intake', 'enroll', 'enrollment', 'register', 'registration', 'who can'].forEach((w) => expandedTokens.add(w));
+        }
+
+        // Refund, Cancellation, and Policy
+        if (searchTokens.some((t) => ['refund', 'cancel', 'cancellation', 'withdraw', 'withdrawal', 'policy', 'policies', 'guarantee', 'money'].some((w) => t.includes(w) || w.includes(t)))) {
+          ['refund', 'refunds', 'cancellation', 'cancel', 'withdrawal', 'withdraw', 'policy', 'policies', 'guarantee', 'money back', 'terms'].forEach((w) => expandedTokens.add(w));
+        }
+
+        // Career, Placement, and Jobs
+        if (searchTokens.some((t) => ['placement', 'career', 'job', 'internship', 'hiring', 'salary', 'package', 'work'].some((w) => t.includes(w) || w.includes(t)))) {
+          ['placement', 'placements', 'career', 'careers', 'job', 'jobs', 'internship', 'internships', 'hiring', 'salary', 'hired', 'alumni', 'employment'].forEach((w) => expandedTokens.add(w));
+        }
+
+        // Certifications, Accreditation, and Degree
+        if (searchTokens.some((t) => ['certificate', 'certification', 'diploma', 'degree', 'accredit', 'accreditation'].some((w) => t.includes(w) || w.includes(t)))) {
+          ['certificate', 'certification', 'certifications', 'diploma', 'degree', 'accredited', 'accreditation', 'credential', 'recognized'].forEach((w) => expandedTokens.add(w));
+        }
+
+        // Healthcare, Doctor, and Treatments
+        if (searchTokens.some((t) => ['doctor', 'treatment', 'surgery', 'clinic', 'hospital', 'health', 'patient', 'appointment', 'consult'].some((w) => t.includes(w) || w.includes(t)))) {
+          ['treatment', 'treatments', 'doctor', 'doctors', 'physician', 'specialist', 'department', 'care', 'surgery', 'clinic', 'appointment', 'consultation', 'therapy'].forEach((w) => expandedTokens.add(w));
+        }
+
+        // Contact, Office, Location, and Support
+        if (searchTokens.some((t) => ['contact', 'reach', 'phone', 'call', 'email', 'number', 'address', 'where', 'location', 'office', 'support'].some((w) => t.includes(w) || w.includes(t)))) {
+          ['contact', 'phone', 'email', 'call', 'reach', 'website', 'address', 'located', 'office', 'headquarters', 'directions'].forEach((w) => expandedTokens.add(w));
+        }
+
+        let matchedCount = 0;
         for (const token of expandedTokens) {
-          if (contentLower.includes(token)) matchedTokens++;
-        }
-        if (expandedTokens.size > 0) {
-          score += (matchedTokens / expandedTokens.size) * 0.70;
+          if (contentLower.includes(token)) matchedCount++;
         }
 
-        // Boost chunks containing prices when user asks about price/cost
-        const isPriceQuery = expandedTokens.has('price') || expandedTokens.has('cost');
-        if (isPriceQuery && (contentLower.includes('₹') || contentLower.includes('$') || /\b(costs?|price|pricing|fee|fees)\b/i.test(contentLower))) {
-          score += 0.65;
-        }
-
-        // Boost chunks containing hours when user asks about timing
-        const isTimeQuery = expandedTokens.has('hours') || expandedTokens.has('timing');
-        if (isTimeQuery && /\b(\d{1,2}(?::\d{2})?\s*(?:am|pm)|hours|timing|schedule)\b/i.test(contentLower)) {
-          score += 0.65;
-        }
+        // Significant token match score
+        const tokenMatchRatio = searchTokens.length > 0 ? matchedCount / Math.max(1, searchTokens.length) : 0;
+        score += Math.min(1.8, tokenMatchRatio * 0.95);
 
         // Exact query substring match boost
         if (contentLower.includes(qLower)) {
-          score += 0.50;
+          score += 0.85;
         }
 
-        // Document title match boost
-        if (c.sourceTitle && Array.from(expandedTokens).some((t) => c.sourceTitle.toLowerCase().includes(t))) {
-          score += 0.35;
+        // Multi-term co-occurrence boost (entity + attribute)
+        const matchedSignificant = searchTokens.filter((t) => contentLower.includes(t));
+        if (matchedSignificant.length >= 2) {
+          score += 0.40 * matchedSignificant.length;
         }
 
-        // Strict relevance check: do not return chunks with zero keyword and zero vector match
-        const hasKeywordMatch = matchedTokens > 0 || contentLower.includes(qLower) || Boolean(c.sourceTitle && Array.from(expandedTokens).some((t) => c.sourceTitle.toLowerCase().includes(t)));
-        const hasVectorMatch = Boolean(c.similarity && c.similarity >= this.similarityThreshold);
+        // Numbers, prices, and entity matches
+        const hasNumberMatch = /\b\d{2,}\b/.test(qLower) && /\b\d{2,}\b/.test(contentLower);
+        if (hasNumberMatch) {
+          score += 0.45;
+        }
+
+        // Document title or Section header match boost
+        const docTitle = (c.sourceTitle || meta.title || meta.section || '').toLowerCase();
+        if (docTitle && Array.from(expandedTokens).some((t) => docTitle.includes(t))) {
+          score += 0.55;
+        }
+
+        // Keep chunks that have vector similarity OR any matching keyword
+        const hasKeywordMatch = matchedCount > 0 || contentLower.includes(qLower) || Boolean(docTitle && Array.from(expandedTokens).some((t) => docTitle.includes(t)));
+        const hasVectorMatch = Boolean(c.similarity && c.similarity >= 0.38);
 
         if (!hasKeywordMatch && !hasVectorMatch) {
           continue;
@@ -424,7 +507,29 @@ export class RetrievalService {
 
     // Sort by final hybrid score descending
     scoredList.sort((a, b) => b.score - a.score);
-    const topResults = scoredList.slice(0, k);
+    let topResults = scoredList.slice(0, k);
+
+    // Fallback: If 0 results or top score is weak, fall back to project overview chunks
+    if (topResults.length === 0 && allProjectChunks.length > 0) {
+      topResults = allProjectChunks.slice(0, Math.min(3, k)).map((c: any) => ({
+        id: c.id,
+        projectId: c.projectId || projectId,
+        content: c.content,
+        metadata: typeof c.metadata === 'string' ? JSON.parse(c.metadata) : (c.metadata || {}),
+        score: 0.50,
+        sourceTitle: c.sourceTitle || (botConfig?.botName ? `${botConfig.botName} Overview` : 'Knowledge Base'),
+        sourceUrl: c.sourceUrl || botConfig?.websiteUrl || '',
+      }));
+    }
+
+    // Save in cache
+    this.cache.set(cacheKey, {
+      results: topResults,
+      timestamp: Date.now(),
+    });
+
+    logger.info(`Hybrid retrieval for "${query}" (Project: ${projectId}, RealEstate: ${isRealEstate}): Found ${topResults.length} relevant chunks (top score: ${topResults[0]?.score.toFixed(2) || '0.00'})`);
+    return topResults;
 
     // Save in cache
     this.cache.set(cacheKey, {
@@ -439,7 +544,7 @@ export class RetrievalService {
   /**
    * Format retrieved chunks into a clean grounded context block for LLM prompt
    */
-  formatContextForPrompt(chunks: RetrievedChunkResult[], maxChunks = 3, botConfig?: { industry?: string; botName?: string }): string {
+  formatContextForPrompt(chunks: RetrievedChunkResult[], maxChunks = 6, botConfig?: { industry?: string; botName?: string }): string {
     const isRealEstate = botConfig?.industry === 'real-estate';
     if (!chunks || chunks.length === 0) {
       return isRealEstate
@@ -452,7 +557,7 @@ export class RetrievalService {
     const chosen = validChunks.length > 0 ? validChunks.slice(0, maxChunks) : chunks.slice(0, maxChunks);
 
     let totalChars = 0;
-    const maxTotalChars = 6000;
+    const maxTotalChars = 8000;
     const formattedBlocks: string[] = [];
 
     for (let i = 0; i < chosen.length; i++) {

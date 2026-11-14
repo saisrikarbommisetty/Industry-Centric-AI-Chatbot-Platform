@@ -4,6 +4,7 @@ import { projectRepository } from '../repositories/project.repository';
 import { crawlerService } from '../services/crawler/crawler.service';
 import { chunkingService } from '../services/rag/chunking.service';
 import { embeddingService } from '../services/embeddings/embedding.service';
+import { retrievalService } from '../services/rag/retrieval.service';
 import { AppError } from '../middleware/errorHandler.middleware';
 import { logger } from '../utils/logger';
 
@@ -11,25 +12,28 @@ export class KnowledgeController {
   async addUrl(req: Request, res: Response, next: NextFunction) {
     try {
       const { projectId } = req.params;
-      const { url, title, type, summary, extractedSummary } = req.body;
+      const { url, title, type, summary, extractedSummary, content, text, documentContent } = req.body;
 
       const project = (await projectRepository.findById(projectId)) || (await projectRepository.findBySlug(projectId));
       if (!project) {
         return next(new AppError('Project not found', 404, 'PROJECT_NOT_FOUND'));
       }
 
+      const rawContent = (content || text || documentContent || summary || extractedSummary || '').trim();
+      const resolvedUrl = url && url !== '#' ? url : `https://${project.slug || project.id}.local/doc-${Date.now()}`;
+
       const source = await knowledgeRepository.createSource({
         projectId: project.id,
-        url,
-        title: title || url,
-        type: type || 'URL',
+        url: resolvedUrl,
+        title: title || url || 'Knowledge Source',
+        type: type ? String(type).toUpperCase() : (rawContent.length > 0 && !url ? 'DOCUMENT' : 'URL'),
         status: 'PENDING',
-        extractedSummary: summary || extractedSummary,
+        extractedSummary: summary || extractedSummary || (rawContent.length > 0 ? rawContent.slice(0, 200) : undefined),
       });
 
-      // Trigger asynchronous crawl & index for this URL
-      this.processSingleSource(project.id, source).catch((err) =>
-        logger.error(`Error processing single source ${url}: ${err.message}`)
+      // Trigger asynchronous processing with full content support
+      this.processSingleSource(project.id, source, rawContent).catch((err) =>
+        logger.error(`Error processing single source ${resolvedUrl}: ${err.message}`)
       );
 
       res.status(201).json({
@@ -146,14 +150,30 @@ export class KnowledgeController {
       const totalDocs = await knowledgeRepository.getDocumentsByProjectId(targetId);
       const allChunks = await knowledgeRepository.getAllChunks(targetId);
 
+      const isAnyCrawling = sources.some((s) => s.status === 'CRAWLING' || s.status === 'PENDING');
+      const isAnyFailed = sources.some((s) => s.status === 'FAILED');
+      const overallStatus = isAnyCrawling ? 'crawling' : (allChunks.length > 0 ? 'indexed' : (isAnyFailed ? 'failed' : 'ready'));
+
       res.status(200).json({
         success: true,
         data: {
-          status: 'ready',
+          status: overallStatus,
           sourcesCount: sources.length,
           documentsCount: totalDocs.length,
           chunksCount: allChunks.length,
-          lastSync: sources[0]?.lastIndexedAt || new Date(),
+          pagesDiscovered: sources.length,
+          pagesIndexed: sources.filter((s) => s.status === 'INDEXED').length,
+          pagesFailed: sources.filter((s) => s.status === 'FAILED').length,
+          lastSync: sources[0]?.lastIndexedAt || sources[0]?.updatedAt || new Date(),
+          sources: sources.map((s) => ({
+            id: s.id,
+            title: s.title,
+            url: s.url,
+            type: s.type,
+            status: s.status,
+            lastIndexedAt: s.lastIndexedAt,
+            extractedSummary: s.extractedSummary,
+          })),
         },
       });
     } catch (error) {
@@ -162,13 +182,73 @@ export class KnowledgeController {
   }
 
   /**
-   * Helper: Process a single source URL into documents and pgvector chunks
+   * Helper: Process a single source URL or direct document into documents and pgvector chunks
    */
-  public async processSingleSource(projectId: string, source: any) {
+  public async processSingleSource(projectId: string, source: any, directContent?: string) {
     await knowledgeRepository.updateSource(source.id, { status: 'CRAWLING' });
 
+    const project = (await projectRepository.findById(projectId)) || (await projectRepository.findBySlug(projectId));
+    const isRealEstate = Boolean(project?.industry === 'real-estate' || project?.industry === 'real_estate' || project?.name?.toLowerCase().includes('prycoons'));
+    const botConfig = { industry: project?.industry, botName: project?.name, isRealEstate };
+
+    // Case A: Direct content or uploaded document provided
+    if (directContent && directContent.trim().length > 10) {
+      try {
+        const fullText = directContent.trim();
+        const contentHash = 'doc-' + Date.now();
+
+        const doc = await knowledgeRepository.createDocument({
+          sourceId: source.id,
+          projectId,
+          title: source.title || 'Knowledge Document',
+          url: source.url,
+          content: fullText,
+          metadata: { documentType: source.type || 'DOCUMENT', isManual: true },
+          contentHash,
+        });
+
+        await knowledgeRepository.deleteDocumentChunks(doc.id);
+
+        const syntheticPage = {
+          url: source.url,
+          title: source.title || 'Knowledge Document',
+          rawHtml: '',
+          extractedText: fullText,
+          headings: [],
+          metaDescription: '',
+          metadata: { documentType: source.type || 'DOCUMENT' },
+          contentHash,
+        };
+
+        const chunks = chunkingService.chunkPage(syntheticPage, botConfig);
+        for (const chunk of chunks) {
+          const embedding = await embeddingService.generateEmbedding(chunk.content);
+          await knowledgeRepository.createChunk({
+            documentId: doc.id,
+            projectId,
+            content: chunk.content,
+            embedding,
+            metadata: chunk.metadata,
+            chunkIndex: chunk.chunkIndex,
+          });
+        }
+
+        await knowledgeRepository.updateSource(source.id, {
+          status: 'INDEXED',
+          lastIndexedAt: new Date(),
+          lastCrawledAt: new Date(),
+          contentHash,
+          extractedSummary: `${source.title}: Extracted ${chunks.length} knowledge chunks.`,
+        });
+        return;
+      } catch (err: any) {
+        logger.error(`Error processing direct document content for source ${source.id}: ${err.message}`);
+      }
+    }
+
+    // Case B: Crawl website URL
     try {
-      const page = await crawlerService.fetchAndExtractPage(source.url);
+      const page = await crawlerService.fetchAndExtractPage(source.url, botConfig);
       if (!page) {
         throw new Error('Could not fetch page content');
       }
@@ -198,12 +278,8 @@ export class KnowledgeController {
       // Clear old chunks if any
       await knowledgeRepository.deleteDocumentChunks(doc.id);
 
-      // Resolve project config to determine if Houzez property card extraction applies
-      const project = (await projectRepository.findById(projectId)) || (await projectRepository.findBySlug(projectId));
-      const isRealEstate = Boolean(project?.industry === 'real-estate' || project?.industry === 'real_estate' || project?.name?.toLowerCase().includes('prycoons'));
-
       // Chunk and embed
-      const chunks = chunkingService.chunkPage(page, { industry: project?.industry, botName: project?.name, isRealEstate });
+      const chunks = chunkingService.chunkPage(page, botConfig);
       for (const chunk of chunks) {
         const embedding = await embeddingService.generateEmbedding(chunk.content);
         await knowledgeRepository.createChunk({
@@ -339,7 +415,7 @@ export class KnowledgeController {
     const isRealEstate = Boolean(project?.industry === 'real-estate' || project?.industry === 'real_estate' || project?.name?.toLowerCase().includes('prycoons'));
     const botConfig = { industry: project?.industry, botName: project?.name, isRealEstate };
 
-    const pages = await crawlerService.crawlWebsite(startUrl, maxPages);
+    const pages = await crawlerService.crawlWebsite(startUrl, maxPages, botConfig);
 
     let docsCreated = 0;
     let chunksCreated = 0;
@@ -466,6 +542,9 @@ export class KnowledgeController {
       skippedUnchanged,
       failed,
     };
+
+    // Invalidate retrieval caches so newly indexed chunks are immediately retrievable
+    retrievalService.invalidateCache(projectId);
 
     logger.info(`=== INGESTION SUMMARY ===`);
     logger.info(JSON.stringify(summary, null, 2));
