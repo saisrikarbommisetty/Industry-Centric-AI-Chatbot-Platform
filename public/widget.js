@@ -16,6 +16,7 @@
   const currentScript =
     document.currentScript ||
     document.querySelector('script[data-assistant-id]') ||
+    document.querySelector('script[data-bot-id]') ||
     document.querySelector('script[src*="widget.js"]');
 
   if (!currentScript) {
@@ -23,7 +24,10 @@
     return;
   }
 
-  const assistantId = currentScript.getAttribute('data-assistant-id') || 'prycoons-ai';
+  const assistantId =
+    currentScript.getAttribute('data-assistant-id') ||
+    currentScript.getAttribute('data-bot-id') ||
+    'prycoons-ai';
   const position = currentScript.getAttribute('data-position') || 'right'; // 'right' | 'left'
   const primaryColor = currentScript.getAttribute('data-color') || '#0f766e'; // Default teal / brand color
   const scriptUrl = currentScript.src || window.location.href;
@@ -127,7 +131,7 @@
       }
     }
   `;
-  document.head.appendChild(styleEl);
+  (document.head || document.documentElement).appendChild(styleEl);
 
   // SVG Icons
   const CHAT_ICON_SVG = `
@@ -199,6 +203,14 @@
 
   // Append elements to DOM once ready
   function initDOM() {
+    if (!document.body) {
+      if (document.readyState !== 'complete') {
+        window.addEventListener('DOMContentLoaded', initDOM, { once: true });
+        return;
+      }
+      setTimeout(initDOM, 50);
+      return;
+    }
     document.body.appendChild(container);
     document.body.appendChild(launcherBtn);
   }
