@@ -20,8 +20,9 @@ export const BotCreatedSuccess = () => {
   const [copiedEmbed, setCopiedEmbed] = useState(false);
 
   const currentBot = bots.find((b) => b.id === botId) || bots[0];
-  const publicUrl = `${window.location.origin}/chat/${currentBot?.id || 'prycoons-ai'}`;
-  const embedCode = `<script src="https://cdn.brimai.com/widget.js" data-assistant-id="${currentBot?.id || 'prycoons-ai'}" async></script>`;
+  const origin = typeof window !== 'undefined' ? window.location.origin : '';
+  const publicUrl = `${origin}/chat/${currentBot?.id || 'prycoons-ai'}`;
+  const embedCode = `<script src="${origin}/widget.js" data-assistant-id="${currentBot?.id || 'prycoons-ai'}" async></script>`;
 
   useEffect(() => {
     try {

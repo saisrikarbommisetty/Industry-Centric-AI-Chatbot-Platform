@@ -111,6 +111,12 @@ export const PublicChatPreview = () => {
   const navigate = useNavigate();
   const { bots, sendChatMessage, submitLead, addToast } = usePlatform();
 
+  // Detect if running inside iframe or with ?embed=true
+  const isEmbed = typeof window !== 'undefined' && (
+    new URLSearchParams(window.location.search).get('embed') === 'true' ||
+    window.self !== window.top
+  );
+
   const [fetchedBot, setFetchedBot] = useState(null);
   const foundBot = bots.find((b) => b.id === botId || b.slug === botId);
   const currentBot = foundBot || fetchedBot || (botId && botId !== 'prycoons-ai' ? {
@@ -807,25 +813,27 @@ export const PublicChatPreview = () => {
   return (
     <div 
       style={{
-        minHeight: '100vh',
+        minHeight: isEmbed ? '100%' : '100vh',
+        height: isEmbed ? '100%' : 'auto',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        padding: '1rem',
-        backgroundColor: 'var(--bg-app)'
+        padding: isEmbed ? '0' : '1rem',
+        backgroundColor: isEmbed ? 'transparent' : 'var(--bg-app)',
+        overflow: 'hidden'
       }}
     >
       <div 
         className="chat-container"
         style={{
           width: '100%',
-          maxWidth: '520px',
-          height: '92vh',
-          maxHeight: '780px',
-          boxShadow: 'var(--shadow-xl)',
+          maxWidth: isEmbed ? '100%' : '520px',
+          height: isEmbed ? '100%' : '92vh',
+          maxHeight: isEmbed ? '100%' : '780px',
+          boxShadow: isEmbed ? 'none' : 'var(--shadow-xl)',
           backgroundColor: '#FFFFFF',
-          borderRadius: 'var(--radius-xl)',
-          border: '1px solid var(--border-default)'
+          borderRadius: isEmbed ? '0' : 'var(--radius-xl)',
+          border: isEmbed ? 'none' : '1px solid var(--border-default)'
         }}
       >
         {/* Header */}
@@ -852,6 +860,19 @@ export const PublicChatPreview = () => {
             >
               <RotateCcw size={16} />
             </button>
+            {isEmbed && (
+              <button 
+                className="btn btn-ghost btn-sm btn-icon" 
+                title="Close Assistant"
+                onClick={() => {
+                  try {
+                    window.parent.postMessage({ type: 'close-chat-widget' }, '*');
+                  } catch (e) {}
+                }}
+              >
+                <X size={16} />
+              </button>
+            )}
           </div>
         </div>
 

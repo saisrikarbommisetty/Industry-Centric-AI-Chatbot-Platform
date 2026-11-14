@@ -18,12 +18,16 @@ export const BotShare = () => {
   const { bots, addToast } = usePlatform();
 
   const currentBot = bots.find((b) => b.id === botId) || bots[0];
-  const publicUrl = `${window.location.origin}/chat/${currentBot.id}`;
+  const origin = typeof window !== 'undefined' ? window.location.origin : '';
+  const publicUrl = `${origin}/chat/${currentBot.id}`;
 
   const [copiedLink, setCopiedLink] = useState(false);
+  const [embedType, setEmbedType] = useState('widget'); // 'widget' | 'iframe'
   const [copiedEmbed, setCopiedEmbed] = useState(false);
 
-  const embedScript = `<script src="https://cdn.brimai.com/widget.js" data-assistant-id="${currentBot.id}" async></script>`;
+  const widgetScript = `<script src="${origin}/widget.js" data-assistant-id="${currentBot.id}" async></script>`;
+  const iframeEmbed = `<iframe src="${origin}/chat/${currentBot.id}?embed=true" width="100%" height="650" style="border:none;border-radius:12px;box-shadow:0 4px 20px rgba(0,0,0,0.1);" allow="microphone"></iframe>`;
+  const currentSnippet = embedType === 'widget' ? widgetScript : iframeEmbed;
 
   const handleCopyLink = () => {
     navigator.clipboard.writeText(publicUrl);
@@ -33,9 +37,9 @@ export const BotShare = () => {
   };
 
   const handleCopyEmbed = () => {
-    navigator.clipboard.writeText(embedScript);
+    navigator.clipboard.writeText(currentSnippet);
     setCopiedEmbed(true);
-    addToast('Embed snippet copied!', 'success');
+    addToast(`${embedType === 'widget' ? 'Widget script' : 'Iframe code'} copied to clipboard!`, 'success');
     setTimeout(() => setCopiedEmbed(false), 2000);
   };
 
@@ -112,7 +116,7 @@ export const BotShare = () => {
         <div className="grid-2" style={{ gap: '1.5rem', marginBottom: '2rem' }}>
           {/* Website Embed Code Card */}
           <div className="card" style={{ padding: '1.5rem', borderRadius: 'var(--radius-lg)' }}>
-            <div className="flex items-center justify-between" style={{ marginBottom: '0.5rem' }}>
+            <div className="flex items-center justify-between" style={{ marginBottom: '0.75rem' }}>
               <div className="flex items-center gap-2">
                 <Code size={16} style={{ color: 'var(--primary)' }} />
                 <h3 className="card-title" style={{ fontSize: '0.95rem' }}>Website Embed Code</h3>
@@ -123,8 +127,30 @@ export const BotShare = () => {
               </button>
             </div>
 
+            {/* Type selector tabs */}
+            <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.75rem' }}>
+              <button
+                type="button"
+                className={`btn btn-sm ${embedType === 'widget' ? 'btn-primary' : 'btn-ghost'}`}
+                style={{ fontSize: '0.75rem', padding: '0.25rem 0.6rem' }}
+                onClick={() => setEmbedType('widget')}
+              >
+                Floating Chat Bubble
+              </button>
+              <button
+                type="button"
+                className={`btn btn-sm ${embedType === 'iframe' ? 'btn-primary' : 'btn-ghost'}`}
+                style={{ fontSize: '0.75rem', padding: '0.25rem 0.6rem' }}
+                onClick={() => setEmbedType('iframe')}
+              >
+                Inline Iframe Embed
+              </button>
+            </div>
+
             <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.75rem' }}>
-              Paste this HTML snippet before the closing <code>&lt;/body&gt;</code> tag on your website.
+              {embedType === 'widget' 
+                ? <>Paste this snippet before the closing <code>&lt;/body&gt;</code> tag on your website to display a floating launcher button.</>
+                : <>Paste this iframe tag anywhere on your website to embed the chat assistant directly into your layout.</>}
             </p>
 
             <div 
@@ -136,10 +162,12 @@ export const BotShare = () => {
                 fontSize: '0.75rem',
                 color: 'var(--text-primary)',
                 border: '1px solid var(--border-default)',
-                overflowX: 'auto'
+                overflowX: 'auto',
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-all'
               }}
             >
-              {embedScript}
+              {currentSnippet}
             </div>
           </div>
 

@@ -71,9 +71,11 @@ export const BotOverview = () => {
     setMessages([fresh.initialMessage]);
   };
 
+  const origin = typeof window !== 'undefined' ? window.location.origin : '';
+  const embedCode = `<script src="${origin}/widget.js" data-assistant-id="${currentBot.id}" async></script>`;
+
   const handleCopyEmbed = () => {
-    const code = `<script src="https://cdn.brimai.com/widget.js" data-assistant-id="${currentBot.id}" async></script>`;
-    navigator.clipboard.writeText(code);
+    navigator.clipboard.writeText(embedCode);
     setCopiedEmbed(true);
     addToast('Embed snippet copied!', 'success');
     setTimeout(() => setCopiedEmbed(false), 2000);
@@ -219,7 +221,7 @@ export const BotOverview = () => {
                   border: '1px solid var(--border-default)'
                 }}
               >
-                {`<script src="https://cdn.brimai.com/widget.js" data-assistant-id="${currentBot.id}" async></script>`}
+                {embedCode}
               </div>
             </div>
           </div>

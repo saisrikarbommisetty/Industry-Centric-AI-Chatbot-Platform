@@ -1,6 +1,8 @@
 import express, { Express, Request, Response } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
+import path from 'path';
+import fs from 'fs';
 import { ENV } from './config/env';
 import { generalRateLimiter } from './middleware/rateLimiter.middleware';
 import { requestLogger } from './middleware/requestLogger.middleware';
@@ -10,8 +12,13 @@ import apiRouter from './routes';
 export function createApp(): Express {
   const app = express();
 
-  // Security Middleware
-  app.use(helmet());
+  // Security Middleware (Permit embedding from external sites)
+  app.use(
+    helmet({
+      frameguard: false,
+      crossOriginResourcePolicy: { policy: 'cross-origin' },
+    })
+  );
   app.use(
     cors({
       origin: (origin, callback) => {
@@ -33,6 +40,19 @@ export function createApp(): Express {
   // Logging & Rate Limiting
   app.use(requestLogger);
   app.use('/api', generalRateLimiter);
+
+  // Serve Universal Embed Widget Script
+  app.get('/widget.js', (req: Request, res: Response) => {
+    res.setHeader('Content-Type', 'application/javascript');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Cache-Control', 'public, max-age=3600');
+    const widgetPath = path.resolve(__dirname, '../../public/widget.js');
+    if (fs.existsSync(widgetPath)) {
+      res.sendFile(widgetPath);
+    } else {
+      res.status(404).send('// widget.js not found');
+    }
+  });
 
   // Health Check Endpoint (Requirement #45)
   app.get('/health', (req: Request, res: Response) => {
