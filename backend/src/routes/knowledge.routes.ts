@@ -17,6 +17,14 @@ router.post('/reindex', (req, res, next) =>
   knowledgeController.reindex(req, res, next)
 );
 
+router.post('/sync', (req, res, next) =>
+  knowledgeController.syncWebsite(req, res, next)
+);
+
+router.post('/retry-failed', (req, res, next) =>
+  knowledgeController.retryFailed(req, res, next)
+);
+
 router.get('/status', (req, res, next) =>
   knowledgeController.getStatus(req, res, next)
 );

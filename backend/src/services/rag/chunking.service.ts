@@ -12,12 +12,12 @@ export class ChunkingService {
   private chunkOverlap: number;
 
   constructor() {
-    this.targetChunkSize = ENV.CHUNK_SIZE || 500;
+    this.targetChunkSize = ENV.CHUNK_SIZE || 550;
     this.chunkOverlap = ENV.CHUNK_OVERLAP || 80;
   }
 
   /**
-   * Split a crawled page into high-quality semantic chunks preserving entities
+   * Split a crawled page into high-quality semantic chunks preserving entities, table headers, and section hierarchy
    */
   chunkPage(page: CrawledPage, botConfig?: { industry?: string; botName?: string; isRealEstate?: boolean }): SemanticChunk[] {
     const chunks: SemanticChunk[] = [];
@@ -92,7 +92,7 @@ Verified Details: Official listing from ${botConfig?.botName || 'our website'}.
       .filter((p) => p.length > 20 && !p.startsWith('Under Construction Rera Approved'));
 
     // Break down oversized blocks while preserving tables, lists, and FAQs
-    const semanticBlocks: Array<{ text: string; sectionHeading?: string; isTable?: boolean }> = [];
+    const semanticBlocks: Array<{ text: string; sectionHeading?: string; isTable?: boolean; isVisual?: boolean }> = [];
     let currentSectionHeading = '';
 
     for (const block of rawBlocks) {
@@ -106,7 +106,6 @@ Verified Details: Official listing from ${botConfig?.botName || 'our website'}.
       if (block.includes('[Table Content]')) {
         const tableLines = block.split('\n').map((l) => l.trim()).filter(Boolean);
         if (tableLines.length >= 3 && block.length > this.targetChunkSize) {
-          // tableLines[0] is [Table Content], tableLines[1] is Header Row
           const tableTag = tableLines[0];
           const headerRow = tableLines[1];
           const dataRows = tableLines.slice(2);
@@ -167,6 +166,16 @@ Verified Details: Official listing from ${botConfig?.botName || 'our website'}.
         continue;
       }
 
+      // Handle Visual Assets / Images
+      if (block.startsWith('[Visual Asset:')) {
+        semanticBlocks.push({
+          text: block,
+          sectionHeading: currentSectionHeading,
+          isVisual: true,
+        });
+        continue;
+      }
+
       // Generic large text blocks: split by sentence boundaries instead of arbitrary character offsets
       if (block.length > this.targetChunkSize * 1.5) {
         const sentences = block.split(/(?<=[.?!])\s+/);
@@ -220,12 +229,17 @@ Verified Details: Official listing from ${botConfig?.botName || 'our website'}.
 
         chunks.push({
           content: contextualContent,
-          metadata: { ...sectionMetadata, section: activeChunkSection },
+          metadata: {
+            ...sectionMetadata,
+            section: activeChunkSection,
+            hasTable: rawContent.includes('[Table Content]'),
+            hasVisual: rawContent.includes('[Visual Asset:'),
+          },
           chunkIndex: chunkIndex++,
         });
 
-        // Retain overlap from end of previous chunk if not a table
-        if (!b.isTable) {
+        // Retain overlap from end of previous chunk if not a table or visual block
+        if (!b.isTable && !b.isVisual) {
           const words = currentChunk.split(/\s+/);
           currentChunk = words.slice(-Math.min(15, words.length)).join(' ') + '\n\n' + b.text;
         } else {
@@ -238,14 +252,19 @@ Verified Details: Official listing from ${botConfig?.botName || 'our website'}.
       }
     }
 
-    if (currentChunk.trim().length > 25) {
+    if (currentChunk.trim().length > 20) {
       const rawContent = currentChunk.trim();
       const sectionPrefix = activeChunkSection && !rawContent.includes(activeChunkSection) ? `[Section: ${activeChunkSection}]\n` : '';
       const contextualContent = `${pageHeader}${sectionPrefix}${rawContent}`.slice(0, 1400);
 
       chunks.push({
         content: contextualContent,
-        metadata: { ...sectionMetadata, section: activeChunkSection },
+        metadata: {
+          ...sectionMetadata,
+          section: activeChunkSection,
+          hasTable: rawContent.includes('[Table Content]'),
+          hasVisual: rawContent.includes('[Visual Asset:'),
+        },
         chunkIndex: chunkIndex++,
       });
     }
@@ -260,8 +279,6 @@ Verified Details: Official listing from ${botConfig?.botName || 'our website'}.
     const blocks: Array<{ content: string; metadata: Record<string, any> }> = [];
     const text = page.extractedText;
 
-    // Regex pattern matching Prycoons property listing cards:
-    // e.g. "Under Construction Rera Approved ₹92 lakh Onwards Ananta(by Dharti Saket) – 3 BHK Gota, Ahmedabad... 1863 - 2079 Sq Ft Super Built Up Area Beds: 3"
     const cardRegex = /(?:Under Construction|Ready to Move|Newly Launch|Pre-launch)?\s*(?:Best Affordable Properties)?\s*(?:Rera Approved)?\s*(₹\s*[0-9.]+\s*(?:lakh|crore)\s*(?:Onwards)?)\s+([A-Za-z0-9\s–\-(]+?(?:\(by\s+[A-Za-z0-9\s]+\))?)\s*[–-]\s*([0-9,\s]+BHK)\s+([^0-9]{3,80}?,\s*Ahmedabad[^\n]*?)([0-9\s-]+Sq Ft[^.\n]*?Beds:\s*[0-9, ]+)/gi;
 
     const matches = [...text.matchAll(cardRegex)];
@@ -273,7 +290,6 @@ Verified Details: Official listing from ${botConfig?.botName || 'our website'}.
       const address = match[4].trim();
       const areaAndBeds = match[5].trim();
 
-      // Extract developer name if present in "Title (by Developer)"
       let projectName = rawTitle;
       let developer = 'Prycoons Developer Partner';
       const devMatch = rawTitle.match(/^(.+?)\s*\(\s*by\s+(.+?)\s*\)$/i);
@@ -282,7 +298,6 @@ Verified Details: Official listing from ${botConfig?.botName || 'our website'}.
         developer = devMatch[2].trim();
       }
 
-      // Convert price to numerical Lakhs for filtering
       let priceNum = 0;
       if (priceStr.toLowerCase().includes('crore')) {
         const val = parseFloat(priceStr.replace(/[^0-9.]/g, ''));
@@ -292,7 +307,6 @@ Verified Details: Official listing from ${botConfig?.botName || 'our website'}.
         if (!isNaN(val)) priceNum = val;
       }
 
-      // Determine area / locality
       const location = page.metadata.location || 'Ahmedabad';
 
       const content = `

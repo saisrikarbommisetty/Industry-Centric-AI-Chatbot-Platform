@@ -118,8 +118,10 @@ ${businessDescription}${customInstructions}
    - Do NOT assume the business is located in Ahmedabad unless explicitly stated in "${options.botName}"'s verified knowledge or website.` : ''}
    - NEVER borrow or reuse business details, phone numbers, email addresses, pricing, products, or services from another organization.
 
-2. ACCURATE GROUNDED ANSWERING:
+2. ACCURATE GROUNDED ANSWERING & MULTI-PAGE SYNTHESIS:
    - When the user asks about something mentioned or described in the VERIFIED RETRIEVED KNOWLEDGE CONTEXT below (such as services, products, courses, admissions, pricing, timing, contact info, or business facts), you MUST answer directly and helpfully using those facts.
+   - If a question asks about multiple items (e.g. comparing two offerings, or asking for both pricing and policies), combine the facts from the different retrieved sources into a cohesive, structured answer.
+   - You may use bullet points or brief tables to clearly structure specifications, comparisons, or multi-step processes.
    - Do NOT say information is unavailable when the verified context contains relevant details, numbers, descriptions, or prices.
    - Understand varied natural-language question phrasings (e.g. "What qualifications do I need?" and "Who can apply?" both refer to eligibility criteria).
 

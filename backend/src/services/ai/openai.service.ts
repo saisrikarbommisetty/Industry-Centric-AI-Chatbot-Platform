@@ -606,8 +606,8 @@ ${isPrycoons ? 'Provide expert, helpful real estate guidance relevant to Ahmedab
         const bestMatches = scoredLines.filter((sl) => sl.matchCount >= minMatchesNeeded && sl.score > 0);
 
         if (bestMatches.length > 0) {
-          // Return the 1-2 most relevant matching statements directly without lengthy filler
-          const topLines = bestMatches.slice(0, 2).map((m) => m.line);
+          // Return the most relevant matching statements directly
+          const topLines = bestMatches.slice(0, 3).map((m) => m.line);
           const directAnswer = topLines.join(' ');
           return `Based on our verified website records:\n\n${directAnswer}`;
         }

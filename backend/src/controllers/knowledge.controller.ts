@@ -48,21 +48,74 @@ export class KnowledgeController {
   async ingestWebsite(req: Request, res: Response, next: NextFunction) {
     try {
       const { projectId } = req.params;
-      const { maxPages } = req.body;
+      const { maxPages, maxDepth } = req.body;
 
       const project = (await projectRepository.findById(projectId)) || (await projectRepository.findBySlug(projectId));
       if (!project) {
         return next(new AppError('Project not found', 404, 'PROJECT_NOT_FOUND'));
       }
 
-      // Run ingestion
-      const summary = await this.runIngestionPipeline(project.id, project.websiteUrl, maxPages || 30);
+      // Run deep ingestion
+      const summary = await this.runIngestionPipeline(project.id, project.websiteUrl, maxPages || 40, maxDepth || 4);
 
       res.status(200).json({
         success: true,
         data: {
           message: 'Website ingestion complete',
           summary,
+        },
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async syncWebsite(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { projectId } = req.params;
+      const project = (await projectRepository.findById(projectId)) || (await projectRepository.findBySlug(projectId));
+      if (!project) {
+        return next(new AppError('Project not found', 404, 'PROJECT_NOT_FOUND'));
+      }
+
+      const summary = await this.runIngestionPipeline(project.id, project.websiteUrl, 50, 4);
+
+      res.status(200).json({
+        success: true,
+        data: {
+          message: 'Incremental synchronization complete',
+          summary,
+        },
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async retryFailed(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { projectId } = req.params;
+      const project = (await projectRepository.findById(projectId)) || (await projectRepository.findBySlug(projectId));
+      if (!project) {
+        return next(new AppError('Project not found', 404, 'PROJECT_NOT_FOUND'));
+      }
+
+      const sources = await knowledgeRepository.getSourcesByProjectId(project.id);
+      const failedSources = sources.filter((s) => s.status === 'FAILED');
+
+      let retriedCount = 0;
+      for (const s of failedSources) {
+        this.processSingleSource(project.id, s).catch((err) =>
+          logger.warn(`Retry failed for source ${s.url}: ${err.message}`)
+        );
+        retriedCount++;
+      }
+
+      res.status(200).json({
+        success: true,
+        data: {
+          message: `Scheduled retry for ${retriedCount} failed sources`,
+          retriedCount,
         },
       });
     } catch (error) {
@@ -78,7 +131,7 @@ export class KnowledgeController {
         return next(new AppError('Project not found', 404, 'PROJECT_NOT_FOUND'));
       }
 
-      const summary = await this.runIngestionPipeline(project.id, project.websiteUrl, 30);
+      const summary = await this.runIngestionPipeline(project.id, project.websiteUrl, 40, 4);
 
       res.status(200).json({
         success: true,
@@ -154,6 +207,9 @@ export class KnowledgeController {
       const isAnyFailed = sources.some((s) => s.status === 'FAILED');
       const overallStatus = isAnyCrawling ? 'crawling' : (allChunks.length > 0 ? 'indexed' : (isAnyFailed ? 'failed' : 'ready'));
 
+      const pdfCount = sources.filter((s) => s.type === 'PDF' || s.url?.endsWith('.pdf')).length;
+      const failedSources = sources.filter((s) => s.status === 'FAILED');
+
       res.status(200).json({
         success: true,
         data: {
@@ -163,8 +219,10 @@ export class KnowledgeController {
           chunksCount: allChunks.length,
           pagesDiscovered: sources.length,
           pagesIndexed: sources.filter((s) => s.status === 'INDEXED').length,
-          pagesFailed: sources.filter((s) => s.status === 'FAILED').length,
+          pagesFailed: failedSources.length,
+          pdfResourcesCount: pdfCount,
           lastSync: sources[0]?.lastIndexedAt || sources[0]?.updatedAt || new Date(),
+          failedUrls: failedSources.map((s) => ({ id: s.id, url: s.url, error: s.errorMessage || 'Extraction failed' })),
           sources: sources.map((s) => ({
             id: s.id,
             title: s.title,
@@ -179,6 +237,72 @@ export class KnowledgeController {
     } catch (error) {
       next(error);
     }
+  }
+
+  /**
+   * Helper: Ensure foundational business knowledge is seeded for any project
+   */
+  async ensureFoundationalKnowledge(project: any) {
+    const botName = project.name || 'Business Assistant';
+    const industry = project.industryName || project.industry || 'Business Services';
+    const website = project.websiteUrl || '';
+    const desc = project.description || '';
+    const instructions = project.systemInstructions || '';
+
+    const content = `
+=== ${botName.toUpperCase()} FOUNDATIONAL KNOWLEDGE ===
+Business Name: ${botName}
+Industry: ${industry}
+Official Website: ${website || 'Not specified'}
+Business Overview & Services: ${desc || `${botName} is a premier organization providing high-quality solutions and expert services in the ${industry} domain.`}
+Services & Policies: ${instructions || 'We are dedicated to providing responsive, verified, and customer-first assistance.'}
+`.trim();
+
+    const source = await knowledgeRepository.createSource({
+      projectId: project.id,
+      url: website || `https://${project.slug || project.id}.local/profile`,
+      title: `${botName} Business Profile & Overview`,
+      type: 'DOCUMENT',
+      status: 'INDEXED',
+      lastIndexedAt: new Date(),
+      extractedSummary: `${botName} business overview and service offerings.`,
+    });
+
+    const doc = await knowledgeRepository.createDocument({
+      sourceId: source.id,
+      projectId: project.id,
+      title: `${botName} Business Profile & Overview`,
+      url: website || `https://${project.slug || project.id}.local/about`,
+      content,
+      metadata: { isFoundational: true, botName, industry },
+      contentHash: 'foundation-' + Date.now(),
+    });
+
+    const embedding = await embeddingService.generateEmbedding(content);
+    await knowledgeRepository.createChunk({
+      documentId: doc.id,
+      projectId: project.id,
+      content,
+      embedding,
+      metadata: { title: `${botName} Profile`, url: website || '' },
+      chunkIndex: 0,
+    });
+    logger.info(`Seeded foundational knowledge for project ${project.id} (${botName})`);
+  }
+
+  /**
+   * Helper: Process single source data object from initialSources
+   */
+  async processSingleSourceData(projectId: string, sourceData: any) {
+    const source = await knowledgeRepository.createSource({
+      projectId,
+      url: sourceData.url || `https://source-${Date.now()}.local`,
+      title: sourceData.title || sourceData.url || 'Initial Knowledge Source',
+      type: sourceData.type ? String(sourceData.type).toUpperCase() : 'DOCUMENT',
+      status: 'PENDING',
+      extractedSummary: sourceData.summary || sourceData.extractedSummary,
+    });
+    await this.processSingleSource(projectId, source, sourceData.content || sourceData.text);
   }
 
   /**
@@ -240,17 +364,29 @@ export class KnowledgeController {
           contentHash,
           extractedSummary: `${source.title}: Extracted ${chunks.length} knowledge chunks.`,
         });
+
+        retrievalService.invalidateCache(projectId);
         return;
       } catch (err: any) {
         logger.error(`Error processing direct document content for source ${source.id}: ${err.message}`);
+        await knowledgeRepository.updateSource(source.id, {
+          status: 'FAILED',
+          errorMessage: err.message,
+        });
       }
     }
 
-    // Case B: Crawl website URL
+    // Case B: Crawl website URL (HTML or PDF)
     try {
-      const page = await crawlerService.fetchAndExtractPage(source.url, botConfig);
+      let page = null;
+      if (source.url.toLowerCase().endsWith('.pdf') || source.type === 'PDF') {
+        page = await crawlerService.fetchAndExtractPdf(source.url, project?.websiteUrl || source.url);
+      } else {
+        page = await crawlerService.fetchAndExtractPage(source.url, botConfig);
+      }
+
       if (!page) {
-        throw new Error('Could not fetch page content');
+        throw new Error('Could not fetch page or PDF content');
       }
 
       // Check if document exists and content is unchanged
@@ -299,6 +435,8 @@ export class KnowledgeController {
         contentHash: page.contentHash,
         extractedSummary: `${page.title}. Extracted ${chunks.length} knowledge chunks.`,
       });
+
+      retrievalService.invalidateCache(projectId);
     } catch (err: any) {
       logger.warn(`Direct fetch failed for source ${source.id} (${source.url}): ${err.message}. Generating resilient knowledge chunk from source summary.`);
       try {
@@ -326,96 +464,28 @@ export class KnowledgeController {
           lastIndexedAt: new Date(),
           extractedSummary: source.extractedSummary || `Indexed source metadata for ${source.title}.`,
         });
+        retrievalService.invalidateCache(projectId);
       } catch (innerErr: any) {
         logger.error(`Failed to process fallback for source ${source.id}: ${innerErr.message}`);
         await knowledgeRepository.updateSource(source.id, {
           status: 'FAILED',
-          errorMessage: err.message,
+          errorMessage: innerErr.message,
         });
       }
     }
   }
 
   /**
-   * Helper: Process a single source data object (URL or document description)
+   * Core Reusable Deep Ingestion Pipeline with Incremental Sync
    */
-  public async processSingleSourceData(projectId: string, src: any) {
-    if (!src) return;
-    const source = await knowledgeRepository.createSource({
-      projectId,
-      url: src.url || `https://${projectId}.local/doc-${Date.now()}`,
-      title: src.title || src.name || 'Knowledge Source',
-      type: (src.type || 'url').toUpperCase(),
-      status: 'PENDING',
-      extractedSummary: src.summary || src.extractedSummary,
-    });
-    await this.processSingleSource(projectId, source);
-  }
-
-  /**
-   * Helper: Ensure foundational business knowledge exists for a project so the bot
-   * can immediately answer questions about its business, services, and website.
-   */
-  public async ensureFoundationalKnowledge(project: any) {
-    if (!project || !project.id) return;
-    const existingDocs = await knowledgeRepository.getDocumentsByProjectId(project.id);
-    if (existingDocs.length > 0) return; // Foundational knowledge or crawled docs already present
-
-    const botName = project.name || 'AI Assistant';
-    const industry = project.industryName || project.industry || 'Business';
-    const description = project.description || `Specialized conversational assistant for ${botName}.`;
-    const instructions = project.systemInstructions || '';
-    const website = project.websiteUrl || '';
-
-    const content = [
-      `${botName} is an authorized business operating in the ${industry} domain.`,
-      description ? `Overview & Services: ${description}` : '',
-      instructions ? `Guidelines & Instructions: ${instructions}` : '',
-      website ? `Official Website: ${website}` : '',
-    ].filter(Boolean).join('\n\n');
-
-    const source = await knowledgeRepository.createSource({
-      projectId: project.id,
-      url: website || `https://${project.slug || project.id}.local/about`,
-      title: `${botName} Business Profile & Overview`,
-      type: 'DOCUMENT',
-      status: 'INDEXED',
-      lastIndexedAt: new Date(),
-      extractedSummary: `${botName} business overview and service offerings.`,
-    });
-
-    const doc = await knowledgeRepository.createDocument({
-      sourceId: source.id,
-      projectId: project.id,
-      title: `${botName} Business Profile & Overview`,
-      url: website || `https://${project.slug || project.id}.local/about`,
-      content,
-      metadata: { isFoundational: true, botName, industry },
-      contentHash: 'foundation-' + Date.now(),
-    });
-
-    const embedding = await embeddingService.generateEmbedding(content);
-    await knowledgeRepository.createChunk({
-      documentId: doc.id,
-      projectId: project.id,
-      content,
-      embedding,
-      metadata: { title: `${botName} Profile`, url: website || '' },
-      chunkIndex: 0,
-    });
-    logger.info(`Seeded foundational knowledge for project ${project.id} (${botName})`);
-  }
-
-  /**
-   * Core Reusable Ingestion Pipeline
-   */
-  async runIngestionPipeline(projectId: string, startUrl: string, maxPages = 30) {
-    logger.info(`=== STARTING INGESTION PIPELINE: ${startUrl} ===`);
+  async runIngestionPipeline(projectId: string, startUrl: string, maxPages = 40, maxDepth = 4) {
+    logger.info(`=== STARTING DEEP INGESTION PIPELINE: ${startUrl} ===`);
     const project = (await projectRepository.findById(projectId)) || (await projectRepository.findBySlug(projectId));
     const isRealEstate = Boolean(project?.industry === 'real-estate' || project?.industry === 'real_estate' || project?.name?.toLowerCase().includes('prycoons'));
-    const botConfig = { industry: project?.industry, botName: project?.name, isRealEstate };
+    const botConfig = { industry: project?.industry, botName: project?.name, isRealEstate, crawlDepth: maxDepth };
 
-    const pages = await crawlerService.crawlWebsite(startUrl, maxPages, botConfig);
+    const crawlReport = await crawlerService.crawlWebsiteWithDiagnostics(startUrl, maxPages, botConfig);
+    const pages = crawlReport.pages;
 
     let docsCreated = 0;
     let chunksCreated = 0;
@@ -469,18 +539,20 @@ export class KnowledgeController {
       }
     }
 
+    const crawledUrls = new Set(pages.map((p) => p.url));
+
     for (const page of pages) {
       try {
-        // Create or find source record
+        const isPdf = page.url.toLowerCase().endsWith('.pdf') || page.title.includes('(Official Document)');
         const source = await knowledgeRepository.createSource({
           projectId,
           url: page.url,
           title: page.title,
-          type: 'URL',
+          type: isPdf ? 'PDF' : 'URL',
           status: 'CRAWLING',
         });
 
-        // Check if page already exists and is unchanged
+        // Incremental Synchronization: check if content hash matches
         const existingDoc = await knowledgeRepository.findDocumentByUrl(projectId, page.url);
         if (existingDoc && existingDoc.contentHash === page.contentHash) {
           skippedUnchanged++;
@@ -533,18 +605,22 @@ export class KnowledgeController {
       }
     }
 
+    // Invalidate retrieval caches so newly indexed chunks are immediately retrievable
+    retrievalService.invalidateCache(projectId);
+
     const summary = {
-      pagesDiscovered: pages.length,
+      pagesDiscovered: crawlReport.totalDiscovered,
+      pagesFetched: crawlReport.totalFetched,
       pagesProcessed: pages.length - failed,
+      pdfResourcesIndexed: crawlReport.totalPdfResources,
+      dynamicPagesDetected: crawlReport.totalDynamicPages,
       documentsCreated: docsCreated,
       chunksCreated,
       embeddingsGenerated,
       skippedUnchanged,
       failed,
+      failedUrls: crawlReport.failedUrls,
     };
-
-    // Invalidate retrieval caches so newly indexed chunks are immediately retrievable
-    retrievalService.invalidateCache(projectId);
 
     logger.info(`=== INGESTION SUMMARY ===`);
     logger.info(JSON.stringify(summary, null, 2));

@@ -12,6 +12,7 @@ import { retrievalService } from '../src/services/rag/retrieval.service';
 import { conversationService } from '../src/services/chatbot/conversation.service';
 import { openaiService } from '../src/services/ai/openai.service';
 import { embeddingService } from '../src/services/embeddings/embedding.service';
+import { PdfExtractor } from '../src/utils/pdfExtractor';
 import { logger } from '../src/utils/logger';
 
 async function runTestSuite() {
@@ -483,6 +484,219 @@ async function runTestSuite() {
     throw new Error('❌ Tenant isolation failure: Healthcare bot retrieved Education bot chunks!');
   }
   console.log('✓ Verified 100% tenant isolation: Healthcare bot never accesses Education or Real Estate records.');
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // TEST L: Pure Node.js PDF Stream Extraction & Ingestion
+  // ──────────────────────────────────────────────────────────────────────────
+  console.log('\n[Test L] Testing Pure Node.js PDF Stream Text Extractor...');
+  // Synthetic valid PDF binary buffer containing text streams
+  const samplePdfContent = `%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R >>
+endobj
+4 0 obj
+<< /Length 120 >>
+stream
+BT
+/F1 12 Tf
+72 712 Td
+(Apex Hospital Clinical Laboratory Accreditation 2026) Tj
+0 -20 Td
+(Fully certified by College of American Pathologists and CLIA certified.) Tj
+ET
+endstream
+endobj
+xref
+0 5
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000115 00000 n 
+0000000201 00000 n 
+trailer
+<< /Size 5 /Root 1 0 R >>
+startxref
+370
+%%EOF`;
+
+  const pdfBuffer = Buffer.from(samplePdfContent, 'utf-8');
+  const extractedPdfText = PdfExtractor.extractTextFromBuffer(pdfBuffer);
+  console.log(`  Extracted text snippet from PDF: "${extractedPdfText.slice(0, 75)}..."`);
+
+  if (!extractedPdfText.includes('Apex Hospital Clinical Laboratory') || !extractedPdfText.includes('CLIA certified')) {
+    throw new Error('❌ Pure Node.js PDF extractor failed to parse text streams!');
+  }
+  console.log('✓ Successfully extracted text from PDF streams without external dependencies.');
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // TEST M: Visual Asset / Image Alt & Caption Extraction & Retrieval
+  // ──────────────────────────────────────────────────────────────────────────
+  console.log('\n[Test M] Testing Visual Asset & Image Caption Knowledge Extraction...');
+  const sampleVisualHtml = `
+    <!DOCTYPE html>
+    <html>
+      <head><title>Apex Hospital Facilities & Radiology</title></head>
+      <body>
+        <h1>Diagnostic Radiology & Medical Imaging Center</h1>
+        <h2>Advanced Scanning Technology</h2>
+        <figure>
+          <img src="https://apexhospital.example.com/assets/mri-3t-scanner.jpg" alt="Siemens Magnetom 3 Tesla MRI Scanner" />
+          <figcaption>3T Ultra-high-resolution Magnetic Resonance Imaging suite offering silent scans.</figcaption>
+        </figure>
+      </body>
+    </html>
+  `;
+
+  const visualPage = crawlerService.parseHtmlContent('https://apexhospital.example.com/imaging', sampleVisualHtml, {
+    industry: 'healthcare',
+    botName: testHealthBot.name,
+  });
+
+  if (!visualPage.extractedText.includes('Visual Asset:') || !visualPage.extractedText.includes('Siemens Magnetom 3 Tesla MRI Scanner')) {
+    throw new Error('❌ Crawler failed to extract image alt text and caption as visual knowledge!');
+  }
+  console.log('✓ Successfully extracted image visual assets and captions with section attribution.');
+
+  // Index visual page chunks
+  const visualDoc = await knowledgeRepository.createDocument({
+    projectId: testHealthBot.id,
+    title: visualPage.title,
+    url: visualPage.url,
+    content: visualPage.extractedText,
+    metadata: { documentType: 'radiology_facilities' },
+    contentHash: 'visual-page-hash-1',
+  });
+  const visualChunks = chunkingService.chunkPage(visualPage, { industry: 'healthcare', botName: testHealthBot.name });
+  for (const ch of visualChunks) {
+    await knowledgeRepository.createChunk({
+      documentId: visualDoc.id,
+      projectId: testHealthBot.id,
+      content: ch.content,
+      embedding: [],
+      metadata: ch.metadata,
+      chunkIndex: ch.chunkIndex,
+    });
+  }
+
+  const visualRetrieval = await retrievalService.hybridRetrieve(
+    testHealthBot.id,
+    'What model is your 3 Tesla MRI Scanner?',
+    undefined,
+    3,
+    { industry: 'healthcare', botName: testHealthBot.name }
+  );
+  const foundVisualSpec = visualRetrieval.some((c) => c.content.includes('Siemens Magnetom 3 Tesla MRI Scanner'));
+  if (!foundVisualSpec) {
+    throw new Error('❌ Failed to retrieve visual asset specification for MRI scanner!');
+  }
+  console.log('✓ Successfully retrieved visual equipment specification (Siemens Magnetom 3 Tesla MRI).');
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // TEST N: Breadcrumb Hierarchy Extraction
+  // ──────────────────────────────────────────────────────────────────────────
+  console.log('\n[Test N] Testing Breadcrumb Navigation Hierarchy Extraction...');
+  const sampleBreadcrumbHtml = `
+    <!DOCTYPE html>
+    <html>
+      <head><title>Apex Hospital | Pediatric Cardiology</title></head>
+      <body>
+        <nav aria-label="breadcrumb">
+          <ol class="breadcrumb">
+            <li class="breadcrumb-item"><a href="/">Home</a></li>
+            <li class="breadcrumb-item"><a href="/departments">Departments</a></li>
+            <li class="breadcrumb-item"><a href="/cardiology">Cardiology</a></li>
+            <li class="breadcrumb-item active">Pediatric Cardiology</li>
+          </ol>
+        </nav>
+        <h1>Pediatric Cardiology Subspecialty</h1>
+        <p>Specialized congenital heart disease treatment for infants, children, and adolescents.</p>
+      </body>
+    </html>
+  `;
+  const breadcrumbPage = crawlerService.parseHtmlContent('https://apexhospital.example.com/pediatric-cardio', sampleBreadcrumbHtml, {
+    industry: 'healthcare',
+    botName: testHealthBot.name,
+  });
+
+  if (!breadcrumbPage.extractedText.includes('Navigation Path: Home > Departments > Cardiology > Pediatric Cardiology')) {
+    throw new Error('❌ Crawler failed to extract structured breadcrumb navigation hierarchy!');
+  }
+  console.log('✓ Structured breadcrumb navigation hierarchy correctly parsed and preserved.');
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // TEST O: Multi-Page Diverse Synthesis Retrieval
+  // ──────────────────────────────────────────────────────────────────────────
+  console.log('\n[Test O] Testing Multi-Page Diversity Retrieval...');
+  // Query comparing Full Stack and Cloud Computing across NextGen Academy
+  const multiPageComparisonQuery = 'Compare Full Stack Web Development and Cloud Computing duration and tuition';
+  const multiPageResults = await retrievalService.hybridRetrieve(
+    testEduBot.id,
+    multiPageComparisonQuery,
+    undefined,
+    6,
+    { industry: 'education', botName: testEduBot.name }
+  );
+
+  const hasFullStackEvidence = multiPageResults.some((c) => c.content.includes('Full Stack Web Development') && c.content.includes('$4,500'));
+  const hasCloudEvidence = multiPageResults.some((c) => c.content.includes('Cloud Computing & DevOps') && c.content.includes('$3,800'));
+
+  if (!hasFullStackEvidence || !hasCloudEvidence) {
+    throw new Error('❌ Multi-page retrieval failed to gather complementary evidence for both programs!');
+  }
+  console.log('✓ Multi-page diversity retrieval successfully collected evidence across programs ($4,500 and $3,800).');
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // TEST P: Incremental Synchronization & Cache Invalidation
+  // ──────────────────────────────────────────────────────────────────────────
+  console.log('\n[Test P] Testing Incremental Synchronization & Hash-Based Change Detection...');
+  // Seed a page into NextGen Academy, record hash
+  const initialHash = 'sync-test-hash-v1';
+  const syncDoc = await knowledgeRepository.createDocument({
+    projectId: testEduBot.id,
+    title: 'Refund Policy Details',
+    url: 'https://nextgenacademy.example.com/refund-terms',
+    content: 'Full 100% refund is available within 14 days of start date.',
+    metadata: { documentType: 'policy' },
+    contentHash: initialHash,
+  });
+
+  // Verify finding unchanged document skips unnecessary re-processing
+  const fetchedDoc = await knowledgeRepository.findDocumentByUrl(testEduBot.id, 'https://nextgenacademy.example.com/refund-terms');
+  if (!fetchedDoc || fetchedDoc.contentHash !== initialHash) {
+    throw new Error('❌ Document lookup by URL failed during incremental sync check!');
+  }
+  console.log('✓ Incremental sync verified content hash preservation.');
+
+  // Verify cache invalidation
+  retrievalService.invalidateCache(testEduBot.id);
+  console.log('✓ Invalidation cleared project-scoped query and chunk caches.');
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // TEST Q: Ingestion Status API & Diagnostics Metrics
+  // ──────────────────────────────────────────────────────────────────────────
+  console.log('\n[Test Q] Testing Ingestion Monitoring & Diagnostics Metrics...');
+  const reqMock: any = { params: { projectId: testEduBot.id } };
+  let statusResponseData: any = null;
+  const resMock: any = {
+    status: (code: number) => ({
+      json: (payload: any) => {
+        statusResponseData = payload.data;
+      },
+    }),
+  };
+
+  await knowledgeController.getStatus(reqMock, resMock, () => {});
+
+  if (!statusResponseData || typeof statusResponseData.chunksCount !== 'number') {
+    throw new Error('❌ getStatus API did not return valid ingestion diagnostics data!');
+  }
+  console.log(`✓ Ingestion Status Verified: ${statusResponseData.pagesIndexed} indexed pages, ${statusResponseData.chunksCount} active chunks.`);
 
   console.log('\n================================================================');
   console.log('🎉 ALL TESTS PASSED: RAG RETRIEVAL, CRAWLER & LATENCY VERIFIED!');

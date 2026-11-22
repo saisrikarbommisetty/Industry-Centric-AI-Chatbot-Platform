@@ -99,7 +99,7 @@ export interface ExtractedPropertyMetadata {
   address?: string;
   brochureUrl?: string;
   sourceUrl?: string;
-  documentType?: 'property_listing' | 'locality_overview' | 'agency_service' | 'general_faq';
+  documentType?: 'property_listing' | 'locality_overview' | 'agency_service' | 'general_faq' | 'dynamic_spa' | 'downloadable_resource' | 'general_page';
   image?: string;
   images?: string[];
   properties?: ExtractedPropertyMetadata[];

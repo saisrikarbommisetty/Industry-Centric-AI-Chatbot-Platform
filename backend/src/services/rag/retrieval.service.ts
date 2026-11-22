@@ -462,9 +462,19 @@ export class RetrievalService {
         const tokenMatchRatio = searchTokens.length > 0 ? matchedCount / Math.max(1, searchTokens.length) : 0;
         score += Math.min(1.8, tokenMatchRatio * 0.95);
 
-        // Exact query substring match boost
+        // Exact query substring or multi-word phrase match boost
         if (contentLower.includes(qLower)) {
           score += 0.85;
+        } else {
+          // Check 2-word phrase matches
+          const words = rawTokens;
+          for (let i = 0; i < words.length - 1; i++) {
+            const bigram = `${words[i]} ${words[i + 1]}`;
+            if (bigram.length > 6 && contentLower.includes(bigram)) {
+              score += 0.35;
+              break;
+            }
+          }
         }
 
         // Multi-term co-occurrence boost (entity + attribute)
@@ -473,10 +483,29 @@ export class RetrievalService {
           score += 0.40 * matchedSignificant.length;
         }
 
-        // Numbers, prices, and entity matches
-        const hasNumberMatch = /\b\d{2,}\b/.test(qLower) && /\b\d{2,}\b/.test(contentLower);
-        if (hasNumberMatch) {
-          score += 0.45;
+        // Numerical constraint matching (e.g. "under $5000", "below 20 weeks", numbers mentioned)
+        const queryNumbers = qLower.match(/\b\d{2,}\b/g);
+        if (queryNumbers) {
+          for (const num of queryNumbers) {
+            if (contentLower.includes(num)) {
+              score += 0.50;
+            }
+          }
+        }
+
+        // Table and structured specification presence boost
+        if (meta.hasTable || contentLower.includes('[table content]')) {
+          const isTableRelevant = searchTokens.some((t) => ['fee', 'fees', 'price', 'pricing', 'cost', 'duration', 'schedule', 'hours', 'specs', 'specification', 'plan', 'plans'].includes(t));
+          if (isTableRelevant) {
+            score += 0.60;
+          }
+        }
+
+        // Visual / Image inquiry boost
+        if (meta.hasVisual || contentLower.includes('[visual asset:')) {
+          if (searchTokens.some((t) => ['image', 'photo', 'picture', 'diagram', 'visual', 'chart', 'logo', 'look'].includes(t))) {
+            score += 0.80;
+          }
         }
 
         // Document title or Section header match boost
@@ -505,9 +534,36 @@ export class RetrievalService {
       }
     }
 
-    // Sort by final hybrid score descending
+    // 5. Apply Reciprocal Rank Fusion (RRF) & Multi-Page Diversity Re-ranking
+    // Rank candidates by raw hybrid score
     scoredList.sort((a, b) => b.score - a.score);
-    let topResults = scoredList.slice(0, k);
+
+    // Re-rank to ensure multi-page diversity (prevent 1 URL from dominating when other pages have answers)
+    const diverseResults: RetrievedChunkResult[] = [];
+    const urlOccurrenceCount = new Map<string, number>();
+
+    for (const chunk of scoredList) {
+      const u = chunk.sourceUrl || 'default';
+      const count = urlOccurrenceCount.get(u) || 0;
+      // Allow max 2 consecutive chunks from same URL if diverse results are still filling up
+      if (count < 2 || diverseResults.length >= k - 2) {
+        diverseResults.push(chunk);
+        urlOccurrenceCount.set(u, count + 1);
+      }
+      if (diverseResults.length >= k) break;
+    }
+
+    // If diversity selection left room, fill up with remaining top chunks
+    if (diverseResults.length < k) {
+      for (const chunk of scoredList) {
+        if (!diverseResults.some((r) => r.id === chunk.id)) {
+          diverseResults.push(chunk);
+        }
+        if (diverseResults.length >= k) break;
+      }
+    }
+
+    let topResults = diverseResults;
 
     // Fallback: If 0 results or top score is weak, fall back to project overview chunks
     if (topResults.length === 0 && allProjectChunks.length > 0) {
