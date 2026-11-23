@@ -14,6 +14,7 @@ const testFiles = [
   'tests/verify_unified_conversation_flow.ts',
   'tests/verify_multi_industry_isolation.ts',
   'tests/verify_bot_creation_and_website_knowledge.ts',
+  'tests/verify_social_media_integration.ts',
 ];
 
 let allPassed = true;

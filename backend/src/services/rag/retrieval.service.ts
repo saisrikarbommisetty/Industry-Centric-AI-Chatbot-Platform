@@ -455,7 +455,10 @@ export class RetrievalService {
 
         let matchedCount = 0;
         for (const token of expandedTokens) {
-          if (contentLower.includes(token)) matchedCount++;
+          const isMatch = token.length <= 3
+            ? new RegExp(`\\b${token.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\$&')}\\b`, 'i').test(contentLower)
+            : contentLower.includes(token);
+          if (isMatch) matchedCount++;
         }
 
         // Significant token match score
@@ -510,13 +513,21 @@ export class RetrievalService {
 
         // Document title or Section header match boost
         const docTitle = (c.sourceTitle || meta.title || meta.section || '').toLowerCase();
-        if (docTitle && Array.from(expandedTokens).some((t) => docTitle.includes(t))) {
+        const matchesDocTitle = Boolean(
+          docTitle &&
+            Array.from(expandedTokens).some((t) => {
+              return t.length <= 3
+                ? new RegExp(`\\b${t.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\$&')}\\b`, 'i').test(docTitle)
+                : docTitle.includes(t);
+            })
+        );
+        if (matchesDocTitle) {
           score += 0.55;
         }
 
         // Keep chunks that have vector similarity OR any matching keyword
-        const hasKeywordMatch = matchedCount > 0 || contentLower.includes(qLower) || Boolean(docTitle && Array.from(expandedTokens).some((t) => docTitle.includes(t)));
-        const hasVectorMatch = Boolean(c.similarity && c.similarity >= 0.38);
+        const hasKeywordMatch = matchedCount > 0 || contentLower.includes(qLower) || matchesDocTitle;
+        const hasVectorMatch = Boolean(c.similarity && c.similarity >= 0.58);
 
         if (!hasKeywordMatch && !hasVectorMatch) {
           continue;
@@ -565,8 +576,9 @@ export class RetrievalService {
 
     let topResults = diverseResults;
 
-    // Fallback: If 0 results or top score is weak, fall back to project overview chunks
-    if (topResults.length === 0 && allProjectChunks.length > 0) {
+    // Fallback: If 0 results, only fall back to project overview chunks for general/overview queries
+    const isGeneralQuery = /^(hi|hello|hey|help|about|overview|who are you|what do you do|tell me about|services|what is this)\b/i.test(query.trim());
+    if (topResults.length === 0 && allProjectChunks.length > 0 && isGeneralQuery) {
       topResults = allProjectChunks.slice(0, Math.min(3, k)).map((c: any) => ({
         id: c.id,
         projectId: c.projectId || projectId,
@@ -584,16 +596,7 @@ export class RetrievalService {
       timestamp: Date.now(),
     });
 
-    logger.info(`Hybrid retrieval for "${query}" (Project: ${projectId}, RealEstate: ${isRealEstate}): Found ${topResults.length} relevant chunks (top score: ${topResults[0]?.score.toFixed(2) || '0.00'})`);
-    return topResults;
-
-    // Save in cache
-    this.cache.set(cacheKey, {
-      results: topResults,
-      timestamp: Date.now(),
-    });
-
-    logger.info(`Hybrid retrieval for "${query}" (Project: ${projectId}, RealEstate: ${isRealEstate}): Found ${topResults.length} relevant chunks (top score: ${topResults[0]?.score.toFixed(2) || '0.00'})`);
+    logger.info(`Hybrid retrieval for "${query}" (Project: ${projectId}, RealEstate: ${isRealEstate}): Found ${topResults.length} relevant chunks (top score: ${topResults[0]?.score ? topResults[0].score.toFixed(2) : '0.00'})`);
     return topResults;
   }
 

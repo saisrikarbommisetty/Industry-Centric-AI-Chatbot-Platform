@@ -134,6 +134,35 @@ export const api = {
       }),
     getStatus: (projectId) =>
       request(`/api/projects/${projectId}/knowledge/status`),
+    social: {
+      detect: (projectId, url) =>
+        request(`/api/projects/${projectId}/knowledge/social/detect`, {
+          method: 'POST',
+          body: JSON.stringify({ url }),
+        }),
+      preview: (projectId, data) =>
+        request(`/api/projects/${projectId}/knowledge/social/preview`, {
+          method: 'POST',
+          body: JSON.stringify(data),
+        }),
+      list: (projectId) =>
+        request(`/api/projects/${projectId}/knowledge/social`),
+      add: (projectId, data) =>
+        request(`/api/projects/${projectId}/knowledge/social`, {
+          method: 'POST',
+          body: JSON.stringify(data),
+        }),
+      refresh: (projectId, sourceId) =>
+        request(`/api/projects/${projectId}/knowledge/social/${sourceId}/refresh`, {
+          method: 'POST',
+        }),
+      delete: (projectId, sourceId) =>
+        request(`/api/projects/${projectId}/knowledge/social/${sourceId}`, {
+          method: 'DELETE',
+        }),
+      status: (projectId, sourceId) =>
+        request(`/api/projects/${projectId}/knowledge/social/${sourceId}/status`),
+    },
   },
 
   analytics: {

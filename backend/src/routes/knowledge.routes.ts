@@ -2,8 +2,12 @@ import { Router } from 'express';
 import { knowledgeController } from '../controllers/knowledge.controller';
 import { validate } from '../middleware/validation.middleware';
 import { addKnowledgeSourceSchema } from '../validators';
+import socialRoutes from './social.routes';
 
 const router = Router({ mergeParams: true });
+
+// Social Media Knowledge Module Routes
+router.use('/social', socialRoutes);
 
 router.post('/url', validate(addKnowledgeSourceSchema), (req, res, next) =>
   knowledgeController.addUrl(req, res, next)

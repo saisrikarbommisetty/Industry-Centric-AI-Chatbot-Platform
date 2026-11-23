@@ -41,7 +41,20 @@ export const leadCaptureSchema = z.object({
 export const addKnowledgeSourceSchema = z.object({
   url: z.string().url('A valid URL is required'),
   title: z.string().optional(),
-  type: z.enum(['url', 'pdf', 'document', 'faq']).optional().default('url'),
+  type: z.enum(['url', 'pdf', 'document', 'faq', 'social_media']).optional().default('url'),
+  summary: z.string().optional(),
+  extractedSummary: z.string().optional(),
+  content: z.string().optional(),
+  text: z.string().optional(),
+  documentContent: z.string().optional(),
+});
+
+export const addSocialMediaSourceSchema = z.object({
+  url: z.string().url('A valid social media post URL is required'),
+  platform: z.string().optional(),
+  title: z.string().optional(),
+  content: z.string().optional(),
+  manualContent: z.string().optional(),
 });
 
 export const analyticsEventSchema = z.object({

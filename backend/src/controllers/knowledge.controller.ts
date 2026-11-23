@@ -5,6 +5,7 @@ import { crawlerService } from '../services/crawler/crawler.service';
 import { chunkingService } from '../services/rag/chunking.service';
 import { embeddingService } from '../services/embeddings/embedding.service';
 import { retrievalService } from '../services/rag/retrieval.service';
+import { socialMediaService } from '../services/social/socialMedia.service';
 import { AppError } from '../middleware/errorHandler.middleware';
 import { logger } from '../utils/logger';
 
@@ -240,75 +241,14 @@ export class KnowledgeController {
   }
 
   /**
-   * Helper: Ensure foundational business knowledge is seeded for any project
-   */
-  async ensureFoundationalKnowledge(project: any) {
-    const botName = project.name || 'Business Assistant';
-    const industry = project.industryName || project.industry || 'Business Services';
-    const website = project.websiteUrl || '';
-    const desc = project.description || '';
-    const instructions = project.systemInstructions || '';
-
-    const content = `
-=== ${botName.toUpperCase()} FOUNDATIONAL KNOWLEDGE ===
-Business Name: ${botName}
-Industry: ${industry}
-Official Website: ${website || 'Not specified'}
-Business Overview & Services: ${desc || `${botName} is a premier organization providing high-quality solutions and expert services in the ${industry} domain.`}
-Services & Policies: ${instructions || 'We are dedicated to providing responsive, verified, and customer-first assistance.'}
-`.trim();
-
-    const source = await knowledgeRepository.createSource({
-      projectId: project.id,
-      url: website || `https://${project.slug || project.id}.local/profile`,
-      title: `${botName} Business Profile & Overview`,
-      type: 'DOCUMENT',
-      status: 'INDEXED',
-      lastIndexedAt: new Date(),
-      extractedSummary: `${botName} business overview and service offerings.`,
-    });
-
-    const doc = await knowledgeRepository.createDocument({
-      sourceId: source.id,
-      projectId: project.id,
-      title: `${botName} Business Profile & Overview`,
-      url: website || `https://${project.slug || project.id}.local/about`,
-      content,
-      metadata: { isFoundational: true, botName, industry },
-      contentHash: 'foundation-' + Date.now(),
-    });
-
-    const embedding = await embeddingService.generateEmbedding(content);
-    await knowledgeRepository.createChunk({
-      documentId: doc.id,
-      projectId: project.id,
-      content,
-      embedding,
-      metadata: { title: `${botName} Profile`, url: website || '' },
-      chunkIndex: 0,
-    });
-    logger.info(`Seeded foundational knowledge for project ${project.id} (${botName})`);
-  }
-
-  /**
-   * Helper: Process single source data object from initialSources
-   */
-  async processSingleSourceData(projectId: string, sourceData: any) {
-    const source = await knowledgeRepository.createSource({
-      projectId,
-      url: sourceData.url || `https://source-${Date.now()}.local`,
-      title: sourceData.title || sourceData.url || 'Initial Knowledge Source',
-      type: sourceData.type ? String(sourceData.type).toUpperCase() : 'DOCUMENT',
-      status: 'PENDING',
-      extractedSummary: sourceData.summary || sourceData.extractedSummary,
-    });
-    await this.processSingleSource(projectId, source, sourceData.content || sourceData.text);
-  }
-
-  /**
    * Helper: Process a single source URL or direct document into documents and pgvector chunks
    */
   public async processSingleSource(projectId: string, source: any, directContent?: string) {
+    if (source.type === 'SOCIAL_MEDIA') {
+      await socialMediaService.processSource(projectId, source, directContent);
+      return;
+    }
+
     await knowledgeRepository.updateSource(source.id, { status: 'CRAWLING' });
 
     const project = (await projectRepository.findById(projectId)) || (await projectRepository.findBySlug(projectId));
@@ -473,6 +413,86 @@ Services & Policies: ${instructions || 'We are dedicated to providing responsive
         });
       }
     }
+  }
+
+  /**
+   * Seed foundational knowledge for a newly created or updated project
+   */
+  async ensureFoundationalKnowledge(project: any) {
+    const botName = project.name || 'AI Assistant';
+    const industry = project.industryName || project.industry || 'Business';
+    const description = project.description || `Specialized conversational assistant for ${botName}.`;
+    const instructions = project.systemInstructions || '';
+    const website = project.websiteUrl || '';
+
+    const content = [
+      `${botName} is an authorized business operating in the ${industry} domain.`,
+      description ? `Overview & Services: ${description}` : '',
+      instructions ? `Guidelines & Instructions: ${instructions}` : '',
+      website ? `Official Website: ${website}` : '',
+    ].filter(Boolean).join('\n\n');
+
+    const source = await knowledgeRepository.createSource({
+      projectId: project.id,
+      url: website || `https://${project.slug || project.id}.local/about`,
+      title: `${botName} Business Profile & Overview`,
+      type: 'DOCUMENT',
+      status: 'INDEXED',
+      lastIndexedAt: new Date(),
+      extractedSummary: `${botName} business overview and service offerings.`,
+    });
+
+    const doc = await knowledgeRepository.createDocument({
+      sourceId: source.id,
+      projectId: project.id,
+      title: `${botName} Business Profile & Overview`,
+      url: website || `https://${project.slug || project.id}.local/about`,
+      content,
+      metadata: { isFoundational: true, botName, industry },
+      contentHash: 'foundation-' + Date.now(),
+    });
+
+    const embedding = await embeddingService.generateEmbedding(content);
+    await knowledgeRepository.createChunk({
+      documentId: doc.id,
+      projectId: project.id,
+      content,
+      embedding,
+      metadata: { title: `${botName} Profile`, url: website || '' },
+      chunkIndex: 0,
+    });
+    logger.info(`Seeded foundational knowledge for project ${project.id} (${botName})`);
+  }
+
+  /**
+   * Helper: Process single source payload (URL, document, or social media)
+   */
+  async processSingleSourceData(projectId: string, src: any) {
+    const rawContent = (src.content || src.text || src.documentContent || src.summary || src.extractedSummary || '').trim();
+    const resolvedUrl = src.url && src.url !== '#' ? src.url : `https://${projectId}.local/doc-${Date.now()}`;
+    const type = src.type ? String(src.type).toUpperCase() : (rawContent.length > 0 && !src.url ? 'DOCUMENT' : 'URL');
+
+    if (type === 'SOCIAL_MEDIA' || type === 'SOCIAL') {
+      return await socialMediaService.addSource({
+        projectId,
+        url: resolvedUrl,
+        title: src.title,
+        platform: src.platform,
+        manualContent: rawContent || undefined,
+      });
+    }
+
+    const source = await knowledgeRepository.createSource({
+      projectId,
+      url: resolvedUrl,
+      title: src.title || src.url || 'Knowledge Source',
+      type,
+      status: 'PENDING',
+      extractedSummary: src.summary || src.extractedSummary || (rawContent.length > 0 ? rawContent.slice(0, 200) : undefined),
+    });
+
+    await this.processSingleSource(projectId, source, rawContent);
+    return source;
   }
 
   /**

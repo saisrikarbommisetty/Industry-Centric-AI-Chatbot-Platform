@@ -76,7 +76,8 @@ export class KnowledgeRepository {
   }): Promise<any> {
     const id = data.id || `src-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
     const rawType = (data.type || 'URL').toUpperCase();
-    const type = (['URL', 'PDF', 'DOCUMENT', 'FAQ'].includes(rawType) ? rawType : 'URL') as any;
+    const isSocialMedia = rawType === 'SOCIAL_MEDIA';
+    const type = (['URL', 'PDF', 'DOCUMENT', 'FAQ', 'SOCIAL_MEDIA'].includes(rawType) ? rawType : 'URL') as any;
     const rawStatus = (data.status || 'PENDING').toUpperCase();
     const status = (['PENDING', 'CRAWLING', 'INDEXED', 'FAILED'].includes(rawStatus) ? rawStatus : 'PENDING') as any;
 
@@ -87,7 +88,7 @@ export class KnowledgeRepository {
       url: data.url,
       title: data.title,
       status,
-      size: data.size || '180 KB',
+      size: data.size || (isSocialMedia ? 'Social Post' : '180 KB'),
       extractedSummary: data.extractedSummary || null,
       createdAt: new Date(),
       updatedAt: new Date(),
@@ -114,11 +115,31 @@ export class KnowledgeRepository {
 
         if (projectInDb) {
           sourceRecord.projectId = projectInDb.id;
-          return await prisma.knowledgeSource.upsert({
-            where: { id },
-            update: sourceRecord as any,
-            create: sourceRecord as any,
-          });
+          try {
+            const saved = await prisma.knowledgeSource.upsert({
+              where: { id },
+              update: sourceRecord as any,
+              create: sourceRecord as any,
+            });
+            memorySources.set(id, { ...saved, type: sourceRecord.type });
+            return saved;
+          } catch (dbUpsertErr: any) {
+            if (isSocialMedia) {
+              try {
+                const fallbackRecord = { ...sourceRecord, type: 'URL' as any };
+                const saved = await prisma.knowledgeSource.upsert({
+                  where: { id },
+                  update: fallbackRecord as any,
+                  create: fallbackRecord as any,
+                });
+                memorySources.set(id, { ...saved, type: 'SOCIAL_MEDIA' });
+                return { ...saved, type: 'SOCIAL_MEDIA' };
+              } catch (fallbackErr: any) {
+                logger.warn(`createSource DB fallback error: ${fallbackErr.message}. Saving in memory.`);
+              }
+            }
+            throw dbUpsertErr;
+          }
         }
       } catch (err: any) {
         logger.warn(`createSource DB error: ${err.message}. Saving in memory.`);
@@ -149,7 +170,15 @@ export class KnowledgeRepository {
             _count: { select: { documents: true } },
           },
         });
-        if (sources.length > 0) return sources;
+        if (sources.length > 0) {
+          return sources.map((s) => {
+            const mem = memorySources.get(s.id);
+            if (mem?.type === 'SOCIAL_MEDIA' || s.size === 'Social Post') {
+              return { ...s, type: 'SOCIAL_MEDIA' };
+            }
+            return s;
+          });
+        }
       } catch (err: any) {
         logger.warn(`getSourcesByProjectId DB error: ${err.message}.`);
       }
@@ -165,7 +194,13 @@ export class KnowledgeRepository {
           where: { id },
           include: { documents: true },
         });
-        if (source) return source;
+        if (source) {
+          const mem = memorySources.get(source.id);
+          if (mem?.type === 'SOCIAL_MEDIA' || source.size === 'Social Post') {
+            return { ...source, type: 'SOCIAL_MEDIA' };
+          }
+          return source;
+        }
       } catch (err: any) {
         logger.warn(`getSourceById DB error: ${err.message}.`);
       }
@@ -178,7 +213,16 @@ export class KnowledgeRepository {
       try {
         const existsInDb = await prisma.knowledgeSource.findUnique({ where: { id } });
         if (existsInDb) {
-          return await prisma.knowledgeSource.update({ where: { id }, data: updates });
+          try {
+            return await prisma.knowledgeSource.update({ where: { id }, data: updates });
+          } catch (dbUpdateErr: any) {
+            if (updates.type === 'SOCIAL_MEDIA') {
+              const safeUpdates = { ...updates, type: 'URL' };
+              const updated = await prisma.knowledgeSource.update({ where: { id }, data: safeUpdates });
+              return { ...updated, type: 'SOCIAL_MEDIA' };
+            }
+            throw dbUpdateErr;
+          }
         }
       } catch (err: any) {
         logger.warn(`updateSource DB error: ${err.message}.`);
@@ -316,6 +360,33 @@ export class KnowledgeRepository {
     for (const [id, chunk] of memoryChunks.entries()) {
       if (chunk.documentId === documentId) {
         memoryChunks.delete(id);
+      }
+    }
+    notifyKnowledgeChange();
+  }
+
+  async deleteSourceDocumentsAndChunks(sourceId: string): Promise<void> {
+    if (isDatabaseConnected) {
+      try {
+        const docs = await prisma.knowledgeDocument.findMany({ where: { sourceId }, select: { id: true } });
+        const docIds = docs.map((d) => d.id);
+        if (docIds.length > 0) {
+          await prisma.knowledgeChunk.deleteMany({ where: { documentId: { in: docIds } } });
+          await prisma.knowledgeDocument.deleteMany({ where: { sourceId } });
+        }
+      } catch (err: any) {
+        logger.warn(`deleteSourceDocumentsAndChunks DB error: ${err.message}.`);
+      }
+    }
+
+    for (const [docId, doc] of memoryDocuments.entries()) {
+      if (doc.sourceId === sourceId) {
+        memoryDocuments.delete(docId);
+        for (const [chunkId, chunk] of memoryChunks.entries()) {
+          if (chunk.documentId === docId) {
+            memoryChunks.delete(chunkId);
+          }
+        }
       }
     }
     notifyKnowledgeChange();

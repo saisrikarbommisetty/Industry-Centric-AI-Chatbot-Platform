@@ -23,6 +23,7 @@ enum SourceType {
   PDF
   DOCUMENT
   FAQ
+  SOCIAL_MEDIA
 }
 
 enum SourceStatus {

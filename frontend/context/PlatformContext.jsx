@@ -414,13 +414,74 @@ export const PlatformProvider = ({ children }) => {
     const src = knowledgeSources.find((s) => s.id === sourceId);
     try {
       if (src) {
-        await api.knowledge.reindex(src.botId);
+        if (src.type === 'social_media') {
+          await api.knowledge.social.refresh(src.botId, sourceId);
+        } else {
+          await api.knowledge.reindex(src.botId);
+        }
       }
     } catch (err) {
       console.warn('Backend reindex failed:', err);
     }
     setKnowledgeSources((prev) => prev.map((s) => s.id === sourceId ? { ...s, lastSync: 'Just now', status: 'synced' } : s));
     addToast('Knowledge source updated and re-synced!', 'success');
+  };
+
+  const addSocialMediaSource = async (botId, { url, title, platform, manualContent }) => {
+    try {
+      const res = await api.knowledge.social.add(botId, {
+        url,
+        title,
+        platform,
+        manualContent,
+      });
+
+      if (res?.isDuplicate) {
+        addToast('This social media post is already in the knowledge base.', 'info');
+        return res;
+      }
+
+      if (res?.success) {
+        addToast('Social media content fetched and indexed successfully!', 'success');
+      } else if (res?.extraction?.error) {
+        addToast(res.extraction.error.message || 'Warning: Content could not be fully extracted.', 'warning');
+      }
+
+      await fetchBotKnowledgeSources(botId);
+      return res;
+    } catch (err) {
+      addToast(err.message || 'Failed to add social media source', 'error');
+      throw err;
+    }
+  };
+
+  const refreshSocialMediaSource = async (botId, sourceId) => {
+    try {
+      const res = await api.knowledge.social.refresh(botId, sourceId);
+      if (res?.success) {
+        addToast('Social media source refreshed and re-indexed!', 'success');
+      } else {
+        addToast(res?.error?.message || 'Refresh completed with warnings', 'warning');
+      }
+      await fetchBotKnowledgeSources(botId);
+      return res;
+    } catch (err) {
+      addToast(err.message || 'Failed to refresh social media source', 'error');
+      throw err;
+    }
+  };
+
+  const deleteSocialMediaSource = async (botId, sourceId) => {
+    try {
+      await api.knowledge.social.delete(botId, sourceId);
+      addToast('Social media source removed from knowledge base', 'info');
+      setKnowledgeSources((prev) => prev.filter((s) => s.id !== sourceId));
+      setBots((prev) => prev.map((b) => b.id === botId ? { ...b, sourcesCount: Math.max(0, (b.sourcesCount || 1) - 1) } : b));
+      return true;
+    } catch (err) {
+      addToast(err.message || 'Failed to delete social media source', 'error');
+      throw err;
+    }
   };
 
   const fetchBotKnowledgeSources = async (botId) => {
@@ -681,6 +742,9 @@ export const PlatformProvider = ({ children }) => {
         addKnowledgeSource,
         removeKnowledgeSource,
         syncKnowledgeSource,
+        addSocialMediaSource,
+        refreshSocialMediaSource,
+        deleteSocialMediaSource,
         conversations,
         fetchProjectConversations,
         sendChatMessage,

@@ -40,7 +40,7 @@ export interface ProjectDTO {
 export interface KnowledgeSourceDTO {
   id: string;
   projectId: string;
-  type: 'url' | 'pdf' | 'document' | 'faq';
+  type: 'url' | 'pdf' | 'document' | 'faq' | 'social_media';
   url: string;
   title: string;
   status: 'pending' | 'crawling' | 'indexed' | 'failed' | 'synced';
