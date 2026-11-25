@@ -39,6 +39,9 @@ async function request(endpoint, options = {}) {
     const data = await res.json().catch(() => ({}));
 
     if (!res.ok) {
+      if (res.status === 401 && endpoint !== '/api/auth/login') {
+        localStorage.removeItem('brim_jwt_token');
+      }
       throw new Error(data?.error?.message || `HTTP ${res.status}: ${res.statusText}`);
     }
 

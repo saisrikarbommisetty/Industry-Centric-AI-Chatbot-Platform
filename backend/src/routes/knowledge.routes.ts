@@ -2,9 +2,13 @@ import { Router } from 'express';
 import { knowledgeController } from '../controllers/knowledge.controller';
 import { validate } from '../middleware/validation.middleware';
 import { addKnowledgeSourceSchema } from '../validators';
+import { authenticate, requireAdmin } from '../middleware/auth.middleware';
 import socialRoutes from './social.routes';
 
 const router = Router({ mergeParams: true });
+
+// Require authenticated admin for all knowledge base operations
+router.use(authenticate, requireAdmin);
 
 // Social Media Knowledge Module Routes
 router.use('/social', socialRoutes);
