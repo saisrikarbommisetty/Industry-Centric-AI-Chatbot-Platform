@@ -2,12 +2,13 @@ import { Request, Response, NextFunction } from 'express';
 import { projectRepository } from '../repositories/project.repository';
 import { knowledgeController } from './knowledge.controller';
 import { AppError } from '../middleware/errorHandler.middleware';
+import { AuthenticatedRequest } from '../middleware/auth.middleware';
 import { logger } from '../utils/logger';
 
 export class ProjectController {
-  async getProjects(req: Request, res: Response, next: NextFunction) {
+  async getProjects(req: AuthenticatedRequest, res: Response, next: NextFunction) {
     try {
-      const projects = await projectRepository.findAll();
+      const projects = await projectRepository.findAll(req.user);
       res.status(200).json({
         success: true,
         data: projects,
@@ -34,9 +35,12 @@ export class ProjectController {
     }
   }
 
-  async createProject(req: Request, res: Response, next: NextFunction) {
+  async createProject(req: AuthenticatedRequest, res: Response, next: NextFunction) {
     try {
-      const project = await projectRepository.create(req.body);
+      const project = await projectRepository.create({
+        ...req.body,
+        userId: req.user?.id || req.body.userId || null,
+      });
       const initialSources = req.body.initialSources || [];
 
       // 1. Always ensure foundational knowledge exists for this project immediately
@@ -71,10 +75,17 @@ export class ProjectController {
     }
   }
 
-  async updateProject(req: Request, res: Response, next: NextFunction) {
+  async updateProject(req: AuthenticatedRequest, res: Response, next: NextFunction) {
     try {
       const { id } = req.params;
-      const updated = await projectRepository.update(id, req.body);
+      const existing = (await projectRepository.findById(id)) || (await projectRepository.findBySlug(id));
+      if (!existing) {
+        return next(new AppError('Project not found', 404, 'PROJECT_NOT_FOUND'));
+      }
+      if (existing.userId && req.user?.role !== 'ADMIN' && existing.userId !== req.user?.id) {
+        return next(new AppError('You do not have permission to update this bot.', 403, 'FORBIDDEN'));
+      }
+      const updated = await projectRepository.update(existing.id, req.body);
       res.status(200).json({
         success: true,
         data: updated,
@@ -84,10 +95,17 @@ export class ProjectController {
     }
   }
 
-  async deleteProject(req: Request, res: Response, next: NextFunction) {
+  async deleteProject(req: AuthenticatedRequest, res: Response, next: NextFunction) {
     try {
       const { id } = req.params;
-      await projectRepository.delete(id);
+      const existing = (await projectRepository.findById(id)) || (await projectRepository.findBySlug(id));
+      if (!existing) {
+        return next(new AppError('Project not found', 404, 'PROJECT_NOT_FOUND'));
+      }
+      if (existing.userId && req.user?.role !== 'ADMIN' && existing.userId !== req.user?.id) {
+        return next(new AppError('You do not have permission to delete this bot.', 403, 'FORBIDDEN'));
+      }
+      await projectRepository.delete(existing.id);
       res.status(200).json({
         success: true,
         data: { message: 'Project deleted' },

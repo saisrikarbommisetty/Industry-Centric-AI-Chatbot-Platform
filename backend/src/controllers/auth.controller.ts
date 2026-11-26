@@ -18,12 +18,9 @@ export class AuthController {
         return next(new AppError('Invalid email or password', 401, 'INVALID_CREDENTIALS'));
       }
 
-      // Check password
+      // Check password against bcrypt hash
       const isMatch = await bcrypt.compare(cleanPassword, user.passwordHash);
-      // Also allow direct match if demo fallback
-      const directMatch = cleanPassword === 'saisrikarbrim@123' && (cleanEmail.includes('saisrikar') || cleanEmail.includes('sai'));
-
-      if (!isMatch && !directMatch) {
+      if (!isMatch) {
         return next(new AppError('Invalid email or password', 401, 'INVALID_CREDENTIALS'));
       }
 

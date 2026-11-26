@@ -22,12 +22,16 @@ export function createApp(): Express {
   app.use(
     cors({
       origin: (origin, callback) => {
-        // Allow requests with no origin (like mobile apps, curl, server-to-server)
+        // Allow requests with no origin (mobile apps, curl, server-to-server)
         if (!origin) return callback(null, true);
         if (ENV.CORS_ORIGINS.includes('*') || ENV.CORS_ORIGINS.some((o) => origin.startsWith(o.trim()))) {
           return callback(null, true);
         }
-        return callback(null, true); // Permissive in dev to support various preview ports
+        // In development allow local preview ports; in production enforce configured CORS_ORIGINS
+        if (ENV.NODE_ENV !== 'production') {
+          return callback(null, true);
+        }
+        return callback(new Error(`Origin ${origin} not allowed by CORS`), false);
       },
       credentials: true,
     })

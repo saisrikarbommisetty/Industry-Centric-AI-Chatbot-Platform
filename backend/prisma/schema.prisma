@@ -50,12 +50,15 @@ model User {
   plan         String?  @default("Growth Pro")
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
+  projects     Project[]
 
   @@index([email])
 }
 
 model Project {
   id                 String              @id @default(uuid())
+  userId             String?
+  user               User?               @relation(fields: [userId], references: [id], onDelete: SetNull)
   name               String
   slug               String              @unique
   industry           String              @default("real-estate")
@@ -82,6 +85,7 @@ model Project {
 
   @@index([slug])
   @@index([industry])
+  @@index([userId])
 }
 
 model KnowledgeSource {

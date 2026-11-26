@@ -8,6 +8,7 @@ export class EmbeddingService {
   private openaiClient: OpenAI | null = null;
   private geminiClient: GoogleGenerativeAI | null = null;
   private embeddingCache: Map<string, number[]> = new Map();
+  private readonly MAX_CACHE_SIZE = 2000;
   private readonly VECTOR_DIMENSION = 768; // Compatible with existing pgvector schema
 
   constructor() {
@@ -59,6 +60,21 @@ export class EmbeddingService {
   }
 
   /**
+   * Store vector in bounded LRU embedding cache
+   */
+  private setCache(hash: string, vector: number[]): void {
+    if (this.embeddingCache.has(hash)) {
+      this.embeddingCache.delete(hash);
+    } else if (this.embeddingCache.size >= this.MAX_CACHE_SIZE) {
+      const oldestKey = this.embeddingCache.keys().next().value;
+      if (oldestKey !== undefined) {
+        this.embeddingCache.delete(oldestKey);
+      }
+    }
+    this.embeddingCache.set(hash, vector);
+  }
+
+  /**
    * Generate an embedding vector for a single text chunk
    */
   async generateEmbedding(text: string): Promise<number[]> {
@@ -67,10 +83,13 @@ export class EmbeddingService {
       return new Array(this.VECTOR_DIMENSION).fill(0);
     }
 
-    // Check cache by content hash
+    // Check cache by content hash (refresh LRU order)
     const hash = generateContentHash(cleanText);
     if (this.embeddingCache.has(hash)) {
-      return this.embeddingCache.get(hash)!;
+      const cached = this.embeddingCache.get(hash)!;
+      this.embeddingCache.delete(hash);
+      this.embeddingCache.set(hash, cached);
+      return cached;
     }
 
     const providerPref = (ENV.EMBEDDING_PROVIDER || 'auto').toLowerCase();
@@ -87,7 +106,7 @@ export class EmbeddingService {
 
         const vector = res.data?.[0]?.embedding;
         if (vector && vector.length === this.VECTOR_DIMENSION) {
-          this.embeddingCache.set(hash, vector);
+          this.setCache(hash, vector);
           return vector;
         }
       } catch (error: any) {
@@ -106,7 +125,7 @@ export class EmbeddingService {
           const vector = result.embedding.values;
 
           if (vector && vector.length === this.VECTOR_DIMENSION) {
-            this.embeddingCache.set(hash, vector);
+            this.setCache(hash, vector);
             return vector;
           }
         } catch {
@@ -117,7 +136,7 @@ export class EmbeddingService {
 
     // 3. High-quality deterministic semantic fallback embedding vector (768-dim)
     const fallbackVector = this.createSemanticVector(cleanText);
-    this.embeddingCache.set(hash, fallbackVector);
+    this.setCache(hash, fallbackVector);
     return fallbackVector;
   }
 

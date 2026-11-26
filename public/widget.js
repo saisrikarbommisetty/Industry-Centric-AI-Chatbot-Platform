@@ -32,9 +32,13 @@
   const primaryColor = currentScript.getAttribute('data-color') || '#0f766e'; // Default teal / brand color
   const scriptUrl = currentScript.src || window.location.href;
 
+  const appUrlAttr =
+    currentScript.getAttribute('data-app-url') ||
+    currentScript.getAttribute('data-frontend-url');
+
   let hostOrigin = '';
   try {
-    hostOrigin = new URL(scriptUrl).origin;
+    hostOrigin = appUrlAttr ? new URL(appUrlAttr).origin : new URL(scriptUrl).origin;
   } catch (e) {
     hostOrigin = window.location.origin;
   }

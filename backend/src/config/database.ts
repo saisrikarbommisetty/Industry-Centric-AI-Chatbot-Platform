@@ -24,6 +24,13 @@ export async function connectDatabase(): Promise<boolean> {
       await prisma.$connect();
       // Test a lightweight query
       await prisma.$queryRaw`SELECT 1;`;
+      // Ensure live PostgreSQL schema stays synced for incremental additions
+      try {
+        await prisma.$executeRawUnsafe(`ALTER TYPE "SourceType" ADD VALUE IF NOT EXISTS 'SOCIAL_MEDIA';`);
+        await prisma.$executeRawUnsafe(`ALTER TABLE "Project" ADD COLUMN IF NOT EXISTS "userId" TEXT;`);
+      } catch {
+        // Non-fatal if DB permissions restrict DDL or already applied
+      }
       isDatabaseConnected = true;
       logger.info('Connected to PostgreSQL database successfully.');
       return true;

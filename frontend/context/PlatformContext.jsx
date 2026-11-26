@@ -107,21 +107,17 @@ export const PlatformProvider = ({ children }) => {
     localStorage.setItem('brim_conversations', JSON.stringify(conversations));
   }, [conversations]);
 
-  // Ensure valid backend JWT token is present for authenticated admin calls
+  // Verify existing JWT token on mount; clear stale unauthenticated sessions
   useEffect(() => {
-    async function ensureJwtToken() {
+    async function verifySession() {
       if (isAuthenticated && !localStorage.getItem('brim_jwt_token')) {
-        try {
-          const res = await api.auth.login('saisrikar@example.com', 'saisrikarbrim@123');
-          if (res?.success && res?.data?.token) {
-            localStorage.setItem('brim_jwt_token', res.data.token);
-          }
-        } catch (e) {
-          console.warn('Auto-token acquisition note:', e.message);
-        }
+        setCurrentUser(null);
+        setIsAuthenticated(false);
+        localStorage.removeItem('brim_user');
+        localStorage.removeItem('brim_auth');
       }
     }
-    ensureJwtToken();
+    verifySession();
   }, [isAuthenticated]);
 
   // Toast Dispatcher
@@ -151,25 +147,11 @@ export const PlatformProvider = ({ children }) => {
         addToast(`Welcome to BRIM AI, ${user.name}!`, 'success');
         return user;
       }
+      throw new Error('Registration failed');
     } catch (err) {
-      console.warn('Backend register failed, using local session:', err);
+      addToast(err.message || 'Could not create account', 'error');
+      throw err;
     }
-
-    const newUser = {
-      id: 'usr-' + Date.now(),
-      name: userData.name || 'Sai Srikar',
-      email: userData.email || 'saisrikar@example.com',
-      role: 'Client Director',
-      organization: userData.organization || 'BRIM Workspace',
-      avatar: 'SS',
-      plan: 'Growth Pro',
-      creditsRemaining: '10,000 / 10,000'
-    };
-
-    setCurrentUser(newUser);
-    setIsAuthenticated(true);
-    addToast(`Welcome to BRIM AI, ${newUser.name}!`, 'success');
-    return newUser;
   };
 
   const loginUser = async (email, password) => {
@@ -188,40 +170,11 @@ export const PlatformProvider = ({ children }) => {
         addToast(`Welcome back, ${user.name}! Signed into ${user.organization || 'Workspace'}.`, 'success');
         return { success: true, user };
       }
+      return { success: false, error: 'Invalid credentials' };
     } catch (err) {
-      console.warn('Backend auth failed, evaluating local fallback credentials:', err);
+      addToast(err.message || 'Invalid email or password', 'error');
+      return { success: false, error: err.message || 'Invalid email or password' };
     }
-
-    // Check if demo user fallback
-    if (cleanEmail === 'saisrikar@example.com' || cleanEmail === 'sai@example.com' || cleanEmail === 'saisrikar' || cleanEmail.includes('saisrikar')) {
-      if (cleanPassword && cleanPassword !== DEMO_USER.password) {
-        addToast('Invalid password. Please enter the correct password.', 'error');
-        return { success: false, error: 'Invalid password' };
-      }
-      setCurrentUser(DEMO_USER);
-      setIsAuthenticated(true);
-      addToast(`Welcome back, ${DEMO_USER.name}! Signed into ${DEMO_USER.organization}.`, 'success');
-      return { success: true, user: DEMO_USER };
-    }
-
-    // Auto-create/format session for any other client email
-    const namePart = cleanEmail.split('@')[0] || 'Client';
-    const formattedName = namePart.charAt(0).toUpperCase() + namePart.slice(1);
-    const newUser = {
-      id: 'usr-' + Date.now(),
-      name: formattedName,
-      email: cleanEmail,
-      role: 'Client Director',
-      organization: `${formattedName}'s Workspace`,
-      avatar: formattedName.slice(0, 2).toUpperCase(),
-      plan: 'Growth Pro',
-      creditsRemaining: '10,000 / 10,000'
-    };
-
-    setCurrentUser(newUser);
-    setIsAuthenticated(true);
-    addToast(`Signed in as ${newUser.name}`, 'success');
-    return { success: true, user: newUser };
   };
 
   const logoutUser = () => {

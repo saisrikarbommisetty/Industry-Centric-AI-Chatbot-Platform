@@ -119,10 +119,11 @@ export class ProjectRepository {
     return memoryProjects.get(slug) || null;
   }
 
-  async findAll(): Promise<any[]> {
+  async findAll(user?: { id: string; role: string }): Promise<any[]> {
+    let allProjects: any[] = [];
     if (isDatabaseConnected) {
       try {
-        return await prisma.project.findMany({
+        allProjects = await prisma.project.findMany({
           orderBy: { createdAt: 'desc' },
           include: {
             _count: {
@@ -136,10 +137,16 @@ export class ProjectRepository {
         });
       } catch (err: any) {
         logger.warn(`Database projects list failed: ${err.message}. Falling back to memory.`);
+        allProjects = Array.from(new Set(Array.from(memoryProjects.values())));
       }
+    } else {
+      allProjects = Array.from(new Set(Array.from(memoryProjects.values())));
     }
-    const unique = Array.from(new Set(Array.from(memoryProjects.values())));
-    return unique;
+
+    if (!user || user.role === 'ADMIN') {
+      return allProjects;
+    }
+    return allProjects.filter((p) => !p.userId || p.userId === user.id);
   }
 
   async create(data: any): Promise<any> {
@@ -147,8 +154,9 @@ export class ProjectRepository {
     const slug = data.slug || id;
 
     // Sanitize data to strictly match columns on Prisma Project model
-    const projectDbRecord = {
+    const projectDbRecord: any = {
       id,
+      userId: data.userId ? String(data.userId) : null,
       name: String(data.name || 'AI Assistant'),
       slug: String(slug),
       industry: String(data.industry || 'real-estate'),
